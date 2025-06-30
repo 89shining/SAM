@@ -27,9 +27,13 @@ class ResizeLongestSide:
         """
         Expects a numpy array with shape HxWxC in uint8 format.
         """
+        # image.shape[0]：原始高度H    image.shape[1]：原始宽度W
+        # get_preprocess_shape()：保证 最长边 缩放到 target_length，同时 保持纵横比
         target_size = self.get_preprocess_shape(image.shape[0], image.shape[1], self.target_length)
+        # 将numpy图像转为PIL，调整至target_size，最后再转至numpy
         return np.array(resize(to_pil_image(image), target_size))
 
+    # 根据缩放后的新图像尺寸重新计算点坐标
     def apply_coords(self, coords: np.ndarray, original_size: Tuple[int, ...]) -> np.ndarray:
         """
         Expects a numpy array of length 2 in the final dimension. Requires the
@@ -39,7 +43,13 @@ class ResizeLongestSide:
         new_h, new_w = self.get_preprocess_shape(
             original_size[0], original_size[1], self.target_length
         )
-        coords = deepcopy(coords).astype(float)
+        coords = deepcopy(coords).astype(float)     # 转为浮点型
+        """
+        coords[..., 0]：表示 X 坐标
+        coords[..., 1]：表示 Y 坐标
+        new_w / old_w：X 坐标缩放比例
+        new_h / old_h：Y 坐标缩放比例
+        """
         coords[..., 0] = coords[..., 0] * (new_w / old_w)
         coords[..., 1] = coords[..., 1] * (new_h / old_h)
         return coords
@@ -95,8 +105,8 @@ class ResizeLongestSide:
         """
         Compute the output size given input size and target long side length.
         """
-        scale = long_side_length * 1.0 / max(oldh, oldw)
-        newh, neww = oldh * scale, oldw * scale
-        neww = int(neww + 0.5)
+        scale = long_side_length * 1.0 / max(oldh, oldw)   # 计算缩放比例 target_length最长边/原始图像最长边
+        newh, neww = oldh * scale, oldw * scale   # 计算新图像尺寸
+        neww = int(neww + 0.5)   # 四舍五入取整
         newh = int(newh + 0.5)
-        return (newh, neww)
+        return (newh, neww)   # 返回新尺寸

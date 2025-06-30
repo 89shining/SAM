@@ -19,7 +19,7 @@ class MaskDecoder(nn.Module):
         *,
         transformer_dim: int,
         transformer: nn.Module,
-        num_multimask_outputs: int = 3,
+        num_multimask_outputs: int = 3,         # 多mask预测的数量，默认为3
         activation: Type[nn.Module] = nn.GELU,
         iou_head_depth: int = 3,
         iou_head_hidden_dim: int = 256,
@@ -46,10 +46,14 @@ class MaskDecoder(nn.Module):
 
         self.num_multimask_outputs = num_multimask_outputs
 
+        # 可学习token，用于输出mask的质量分数IoU,类似于[CLS]token，每个token是transformer_dim维
         self.iou_token = nn.Embedding(1, transformer_dim)
+        # 加上一个最终输出的mask
         self.num_mask_tokens = num_multimask_outputs + 1
+        # 一组可学习token，用来预测mask
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
+        # B,C,H,W -> B,C/8,H/4,W/4
         self.output_upscaling = nn.Sequential(
             nn.ConvTranspose2d(transformer_dim, transformer_dim // 4, kernel_size=2, stride=2),
             LayerNorm2d(transformer_dim // 4),
@@ -112,30 +116,41 @@ class MaskDecoder(nn.Module):
     def predict_masks(
         self,
         image_embeddings: torch.Tensor,
-        image_pe: torch.Tensor,
+        image_pe: torch.Tensor,     # 对整个特征图进行编码 [1,C,H,W]
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
+        # iou_token.weight （1， D)
+        # mask_tokens.weight(C, D)    # C表示输出的mask类型数目
+        # output_tokens （C+1,D)
+        # 拼接iou和mask token
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
+        # 在 0维 添加 prompt的batch 维度 (Bp,C+1,D)
         output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
+        # （Bp，C+1+N，D) 拼接输出的mask_token+iou_token数和sparse_prompt_token数
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
 
         # Expand per-image data in batch direction to be per-mask
+        # [B,D,H/16,W/16]   一张 image 特征需要用于多个 prompt,给每个prompt配一张image
         src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        # 把dense_prompt加入image_embedding
         src = src + dense_prompt_embeddings
+        # [1,D，H/16,W/16]->[Bp，D，H/16,W/16]   给每个prompt的位置配一张image后再配一个位置编码image_pe
         pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
         b, c, h, w = src.shape
 
         # Run the transformer
         hs, src = self.transformer(src, pos_src, tokens)
+        # 提取token中的0位：iou_token
         iou_token_out = hs[:, 0, :]
+        # 提取 token 中的第 1 位到第 1+self.num_mask_tokens 位，即mask_token
         mask_tokens_out = hs[:, 1 : (1 + self.num_mask_tokens), :]
 
         # Upscale mask embeddings and predict masks using the mask tokens
-        src = src.transpose(1, 2).view(b, c, h, w)
-        upscaled_embedding = self.output_upscaling(src)
+        src = src.transpose(1, 2).view(b, c, h, w)  # [B,HW,D] -> [B,C,H,W]
+        upscaled_embedding = self.output_upscaling(src)    # B,C/8,H/4,W/4
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.num_mask_tokens):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))

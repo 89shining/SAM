@@ -80,12 +80,14 @@ class TwoWayTransformer(nn.Module):
         """
         # BxCxHxW -> BxHWxC == B x N_image_tokens x C
         bs, c, h, w = image_embedding.shape
+        # (B, C, H, W)  ->  (B, C, H*W) ->  (B, HW, D)
         image_embedding = image_embedding.flatten(2).permute(0, 2, 1)
+        # [1,HW,D]
         image_pe = image_pe.flatten(2).permute(0, 2, 1)
 
         # Prepare queries
-        queries = point_embedding
-        keys = image_embedding
+        queries = point_embedding   # 点提示作为q（框提示转为2点提示） [B,N,D]
+        keys = image_embedding      # image作为k  [B,HW,D]
 
         # Apply transformer blocks and final layernorm
         for layer in self.layers:
@@ -97,11 +99,12 @@ class TwoWayTransformer(nn.Module):
             )
 
         # Apply the final attention layer from the points to the image
-        q = queries + point_embedding
+        q = queries + point_embedding  # prompt_embedding + prompt位置编码
         k = keys + image_pe
+        # 最后一层
         attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys)
-        queries = queries + attn_out
-        queries = self.norm_final_attn(queries)
+        queries = queries + attn_out    # 残差连接
+        queries = self.norm_final_attn(queries)     # 归一化
 
         return queries, keys
 
@@ -114,7 +117,7 @@ class TwoWayAttentionBlock(nn.Module):
         mlp_dim: int = 2048,
         activation: Type[nn.Module] = nn.ReLU,
         attention_downsample_rate: int = 2,
-        skip_first_layer_pe: bool = False,
+        skip_first_layer_pe: bool = False,   # 在transformer第一层就添加位置编码
     ) -> None:
         """
         A transformer block with four layers: (1) self-attention of sparse
@@ -151,34 +154,38 @@ class TwoWayAttentionBlock(nn.Module):
     def forward(
         self, queries: Tensor, keys: Tensor, query_pe: Tensor, key_pe: Tensor
     ) -> Tuple[Tensor, Tensor]:
-        # Self attention block
+        # Self attention block  自注意力模块
+        # 假设transformer第一层不添加位置编码：q=queries
         if self.skip_first_layer_pe:
             queries = self.self_attn(q=queries, k=queries, v=queries)
-        else:
+        else:  # 假设transformer第一层就添加位置编码:q = queries + query_pe
             q = queries + query_pe
             attn_out = self.self_attn(q=q, k=q, v=queries)
-            queries = queries + attn_out
-        queries = self.norm1(queries)
+            queries = queries + attn_out   # 残差连接
+        queries = self.norm1(queries)    # 层归一化 [B,N,D]
 
         # Cross attention block, tokens attending to image embedding
-        q = queries + query_pe
-        k = keys + key_pe
+        # 让 token 去“看”图像 embedding，从图像中提取有用信息来丰富自身
+        q = queries + query_pe   # prompt_tokens + 位置编码
+        k = keys + key_pe        # image_embedding + 位置编码
         attn_out = self.cross_attn_token_to_image(q=q, k=k, v=keys)
-        queries = queries + attn_out
-        queries = self.norm2(queries)
+        queries = queries + attn_out    # 残差连接
+        queries = self.norm2(queries)   # 层归一化 [B,N,D]
 
-        # MLP block
+        # MLP block  Linear -> GELU -> Linear
         mlp_out = self.mlp(queries)
-        queries = queries + mlp_out
-        queries = self.norm3(queries)
+        queries = queries + mlp_out   # 残差连接
+        queries = self.norm3(queries)   # 层归一化
 
         # Cross attention block, image embedding attending to tokens
+        # 让 图像 embedding 主动去关注 prompt token，也就是 反向注意力
         q = queries + query_pe
         k = keys + key_pe
         attn_out = self.cross_attn_image_to_token(q=k, k=q, v=queries)
         keys = keys + attn_out
         keys = self.norm4(keys)
 
+        # 返回的是 更新后的 prompt token（queries） 和 图像 embedding（keys）
         return queries, keys
 
 
@@ -190,14 +197,15 @@ class Attention(nn.Module):
 
     def __init__(
         self,
-        embedding_dim: int,
+        embedding_dim: int,           # 输入token的维度数
         num_heads: int,
-        downsample_rate: int = 1,
+        downsample_rate: int = 1,     # 降维比例（默认不降维 = 1），用来减小 Q/K/V 的维度，加快计算。
     ) -> None:
         super().__init__()
         self.embedding_dim = embedding_dim
         self.internal_dim = embedding_dim // downsample_rate
         self.num_heads = num_heads
+        # 降维后的维度要是num_heads的整数倍
         assert self.internal_dim % num_heads == 0, "num_heads must divide embedding_dim."
 
         self.q_proj = nn.Linear(embedding_dim, self.internal_dim)
@@ -205,36 +213,39 @@ class Attention(nn.Module):
         self.v_proj = nn.Linear(embedding_dim, self.internal_dim)
         self.out_proj = nn.Linear(self.internal_dim, embedding_dim)
 
+    # 拆分注意力头[B,N,D] -> [B,N_heads,N_tokens,C_per_head]
     def _separate_heads(self, x: Tensor, num_heads: int) -> Tensor:
         b, n, c = x.shape
         x = x.reshape(b, n, num_heads, c // num_heads)
         return x.transpose(1, 2)  # B x N_heads x N_tokens x C_per_head
 
+
+    # 合并注意力头[B,N_heads,N_tokens,C_per_head] -> [B,N,D]
     def _recombine_heads(self, x: Tensor) -> Tensor:
         b, n_heads, n_tokens, c_per_head = x.shape
-        x = x.transpose(1, 2)
+        x = x.transpose(1, 2)   # [B,n_tokens,n_heads,c_per_head]
         return x.reshape(b, n_tokens, n_heads * c_per_head)  # B x N_tokens x C
 
     def forward(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
-        # Input projections
-        q = self.q_proj(q)
+        # Input projections  维度变换
+        q = self.q_proj(q)   # [B,N,D]
         k = self.k_proj(k)
         v = self.v_proj(v)
 
-        # Separate into heads
-        q = self._separate_heads(q, self.num_heads)
+        # Separate into heads  拆分头
+        q = self._separate_heads(q, self.num_heads)  # [B,n_heads,n_tokens,c_per_head]
         k = self._separate_heads(k, self.num_heads)
         v = self._separate_heads(v, self.num_heads)
 
         # Attention
-        _, _, _, c_per_head = q.shape
+        _, _, _, c_per_head = q.shape  # 取出q的最后一个维度
         attn = q @ k.permute(0, 1, 3, 2)  # B x N_heads x N_tokens x N_tokens
-        attn = attn / math.sqrt(c_per_head)
-        attn = torch.softmax(attn, dim=-1)
+        attn = attn / math.sqrt(c_per_head)   # 缩放点积
+        attn = torch.softmax(attn, dim=-1)    # 归一化
 
         # Get output
-        out = attn @ v
-        out = self._recombine_heads(out)
-        out = self.out_proj(out)
+        out = attn @ v   # [B,n_heads,n_tokens,c_per_head]
+        out = self._recombine_heads(out)    # 合并头 [B,N,D]
+        out = self.out_proj(out)   # 恢复维度[B,N,D]
 
         return out

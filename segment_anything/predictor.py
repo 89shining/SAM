@@ -28,9 +28,10 @@ class SamPredictor:
         """
         super().__init__()
         self.model = sam_model
-        self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
-        self.reset_image()
+        self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)  # 最长边调整为sam_model.image_encoder.img_size
+        self.reset_image()    # 重新加载新图像并处理
 
+    # RGB 调整尺寸形状 -> RGB (1,C,H,W) unit8
     def set_image(
         self,
         image: np.ndarray,
@@ -44,17 +45,21 @@ class SamPredictor:
           image (np.ndarray): The image for calculating masks. Expects an
             image in HWC uint8 format, with pixel values in [0, 255].
           image_format (str): The color format of the image, in ['RGB', 'BGR'].
+
+        不符合格式时：AssertionError: image_format must be in ['RGB', 'BGR'], is <实际值>.
+
         """
         assert image_format in [
             "RGB",
             "BGR",
-        ], f"image_format must be in ['RGB', 'BGR'], is {image_format}."
+        ], f"image_format must be in ['RGB', 'BGR'], is {image_format}."    # 确保是RGB/BGR图像
         if image_format != self.model.image_format:
-            image = image[..., ::-1]
+            image = image[..., ::-1]        # 如果不是RGB时，将最后一个维度进行反转 BGR -> RGB
 
         # Transform the image to the form expected by the model
         input_image = self.transform.apply_image(image)
         input_image_torch = torch.as_tensor(input_image, device=self.device)
+        # HWC -> CHW -> 1CHW
         input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]
 
         self.set_torch_image(input_image_torch, image.shape[:2])
@@ -130,18 +135,23 @@ class SamPredictor:
             of masks and H=W=256. These low resolution logits can be passed to
             a subsequent iteration as mask input.
         """
+        # 提示是否已经调用图像预处理，未调用直接报错
         if not self.is_image_set:
             raise RuntimeError("An image must be set with .set_image(...) before mask prediction.")
 
         # Transform input prompts
         coords_torch, labels_torch, box_torch, mask_input_torch = None, None, None, None
         if point_coords is not None:
+            # 确保提供了point_labels
             assert (
                 point_labels is not None
             ), "point_labels must be supplied if point_coords is supplied."
+            # 点坐标归一化 浮点型
             point_coords = self.transform.apply_coords(point_coords, self.original_size)
+            # 转为tensor
             coords_torch = torch.as_tensor(point_coords, dtype=torch.float, device=self.device)
             labels_torch = torch.as_tensor(point_labels, dtype=torch.int, device=self.device)
+            # 添加维度 （1，N,2) 和 (1,N)
             coords_torch, labels_torch = coords_torch[None, :, :], labels_torch[None, :]
         if box is not None:
             box = self.transform.apply_boxes(box, self.original_size)
@@ -210,6 +220,7 @@ class SamPredictor:
             of masks and H=W=256. These low res logits can be passed to
             a subsequent iteration as mask input.
         """
+        # 确保已经调用图像
         if not self.is_image_set:
             raise RuntimeError("An image must be set with .set_image(...) before mask prediction.")
 
