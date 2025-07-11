@@ -22,11 +22,11 @@ net.load_state_dict(torch.load("C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/t
 net.eval()
 
 # ========== 路径配置 ==========
-csv_path = "C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/dataset/test/test_rgb_dataset.csv"
-root_dir = "C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/dataset/test"
-image_dir = "C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/dataset/test/rgb_images"
-nii_dir = "C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/datanii/test_nii"
-test_dir = "C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/testresults/test_0_pixel"
+csv_path = "C:/Users/dell/Desktop/20250707/dataset/test/test_rgb_dataset.csv"  # 测试数据CSV
+root_dir = "C:/Users/dell/Desktop/20250707/dataset/test"      # 测试集文件
+image_dir = "C:/Users/dell/Desktop/20250707/dataset/test/rgb_images"   # 测试image
+nii_dir = "C:/Users/dell/Desktop/20250707/datanii/test_nii"   # 测试集nii文件
+test_dir = "C:/Users/dell/Desktop/testresults/TrainAll/test_0_pixel"   # 测试结果保存
 png_dir = os.path.join(test_dir, "tmp_png")   # 临时保存 PNG
 nii_out_dir = os.path.join(test_dir, "nii_pred")
 os.makedirs(png_dir, exist_ok=True)
