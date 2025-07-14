@@ -16,6 +16,7 @@ from sklearn.model_selection import KFold
 from matplotlib.ticker import MaxNLocator
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
+
 from dice_loss import BCEDiceLoss
 from datasetGTVp import SAMDataset
 from segment_anything import sam_model_registry
@@ -24,6 +25,7 @@ from segment_anything import sam_model_registry
 manual_seed = int.from_bytes(os.urandom(4), 'little')
 random.seed(manual_seed)
 torch.manual_seed(manual_seed)
+
 
 def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, device,
                    epochs, batch_size, lr, save_dir):
@@ -90,36 +92,45 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
     for epoch in range(epochs):
         net.train()
         train_epoch_loss = 0
+        LOSS = []
         train_n_loss = 0
         with tqdm(total=len(train_loader), desc=f'[Train Fold {fold + 1}]', unit='batch', disable=True) as pbar:
+            # 传入一个batch
             for batch_idx, batch in enumerate(train_loader):
                 imgs = batch['image'].to(device)
                 true_masks = batch['GT'].to(device)
                 bbox = batch['train_box'].to(device)
 
-                input_images = torch.cat([net.preprocess(im) for im in imgs], dim=0)
+                input_images = torch.stack([net.preprocess(im) for im in imgs], dim=0)
                 image_embeddings = net.image_encoder(input_images)
 
-                sparse_embeddings, dense_embeddings = net.prompt_encoder(
-                    points=None,
-                    boxes=bbox,
-                    masks=None)
+                logits_list = []
+                for i in range(len(imgs)):
+                    sparse_embeddings, dense_embeddings = net.prompt_encoder(
+                        points=None,
+                        boxes=bbox[i].unsqueeze(0),
+                        masks=None)
+                    low_res_masks, _ = net.mask_decoder(
+                        image_embeddings=image_embeddings[i].unsqueeze(0),
+                        image_pe=net.prompt_encoder.get_dense_pe(),
+                        sparse_prompt_embeddings=sparse_embeddings,
+                        dense_prompt_embeddings=dense_embeddings,
+                        multimask_output=False)
+                    logits_list.append(low_res_masks)
 
-                low_res_masks, _ = net.mask_decoder(
-                    image_embeddings=image_embeddings,
-                    image_pe=net.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=False
-                )
-
+                masks_pred = torch.stack([x.squeeze(0) for x in logits_list], dim=0)
                 if true_masks.dim() == 3:
                     true_masks = true_masks.unsqueeze(1)
-                true_masks = F.interpolate(true_masks, size=low_res_masks.shape[-2:], mode='bilinear', align_corners=False)
-                train_loss = criterion(low_res_masks, true_masks)
+                true_masks = F.interpolate(true_masks, size=masks_pred.shape[-2:], mode='bilinear', align_corners=False)
+                train_loss = criterion(masks_pred, true_masks)
+                # 返回当前batch的loss
+                train_loss_batch = float(train_loss.item())
+                # 当前epoch总loss
+                train_epoch_loss += train_loss_batch
+                train_n_loss += 1
+                # 当前batch的loss反向传播
                 optimizer.zero_grad()
                 train_loss.backward()
-
                 # 梯度裁剪：将梯度值限制在某个指定的范围内，防止梯度值过大导致训练不稳定
                 # clip_value：梯度剪裁阈值，使梯度最大绝对值不超过0.1
                 nn.utils.clip_grad_value_(net.parameters(), 0.1)
@@ -127,25 +138,21 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
                 optimizer.step()
                 # torch.cuda.empty_cache()
 
-                # 返回当前batch的loss
-                train_loss_batch = float(train_loss.item())
-                # 当前epoch总loss
-                train_epoch_loss += train_loss_batch
-                train_n_loss += 1
-
                 # 更新进度条右侧的附加信息:当前epoch的平均loss dice bce
                 pbar.set_postfix({'TrainLoss': f"{train_epoch_loss / train_n_loss:.4f}"})
                 # 更新进度条（进度条前进1步）
                 pbar.update(1)
 
         train_meanLoss = train_epoch_loss / train_n_loss  # 当前epoch每个batch的平均损失
-        trainLoss.append(train_meanLoss)
+        LOSS.append(train_meanLoss)  # LOSS列表保存平均损失
+        trainLoss.append(LOSS[-1])
         writer.add_scalar('Loss/train_epoch_avg', train_meanLoss, epoch + 1)
         # torch.cuda.empty_cache()
 
         # Validation
         net.eval()
         val_epoch_loss = 0
+        LOSS = []
         val_n_loss = 0
         with torch.no_grad():
             with tqdm(total=len(val_loader), desc=f'[Train Fold {fold + 1}]', unit='batch', disable=True) as pbar:
@@ -155,26 +162,27 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
                     true_masks = batch['GT'].to(device)
                     bbox = batch['val_box'].to(device)
 
-                    # preprocess：归一化到[0,1]
-                    input_images = torch.cat([net.preprocess(im) for im in imgs], dim=0)
+                    input_images = torch.stack([net.preprocess(im) for im in imgs], dim=0)
                     image_embeddings = net.image_encoder(input_images)
-
-                    sparse_embeddings, dense_embeddings = net.prompt_encoder(
-                        points=None,
-                        boxes=bbox,
-                        masks=None)
-                    low_res_masks, _ = net.mask_decoder(
-                        image_embeddings=image_embeddings,
-                        image_pe=net.prompt_encoder.get_dense_pe(),
-                        sparse_prompt_embeddings=sparse_embeddings,
-                        dense_prompt_embeddings=dense_embeddings,
-                        multimask_output=False
-                    )
-
+                    logits_list = []
+                    for i in range(len(imgs)):
+                        sparse_embeddings, dense_embeddings = net.prompt_encoder(
+                            points=None,
+                            boxes=bbox[i].unsqueeze(0),
+                            masks=None)
+                        low_res_masks, _ = net.mask_decoder(
+                            image_embeddings=image_embeddings[i].unsqueeze(0),
+                            image_pe=net.prompt_encoder.get_dense_pe(),
+                            sparse_prompt_embeddings=sparse_embeddings,
+                            dense_prompt_embeddings=dense_embeddings,
+                            multimask_output=False)
+                        logits_list.append(low_res_masks)
+                    masks_pred = torch.stack([x.squeeze(0) for x in logits_list], dim=0)
                     if true_masks.dim() == 3:
                         true_masks = true_masks.unsqueeze(1)
-                    true_masks = F.interpolate(true_masks, size=low_res_masks.shape[-2:], mode='bilinear', align_corners=False)
-                    val_loss = criterion(low_res_masks, true_masks)
+                    true_masks = F.interpolate(true_masks, size=masks_pred.shape[-2:], mode='bilinear',
+                                               align_corners=False)
+                    val_loss = criterion(masks_pred, true_masks)
                     # 返回当前batch的loss
                     val_loss_batch = float(val_loss.item())
                     # 当前epoch总loss
@@ -190,7 +198,8 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
                     # torch.cuda.empty_cache()
 
         val_meanLoss = val_epoch_loss / val_n_loss  # 当前epoch每个batch的平均损失
-        valLoss.append(val_meanLoss)
+        LOSS.append(val_meanLoss)  # LOSS列表保存平均损失
+        valLoss.append(LOSS[-1])
         writer.add_scalar('Loss/Val_epoch_avg', val_meanLoss, epoch + 1)
         # torch.cuda.empty_cache()
 
@@ -230,10 +239,10 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
     writer.close()
 
 if __name__ == '__main__':
-    root_dir = '/home/intern/wusi/Dataset/GTVp0604/dataset/train'  # traindataset的目录
-    csv_path = '/home/intern/wusi/Dataset/GTVp0604/dataset/train/train_nii.csv'
-    nii_dir = "/home/intern/wusi/Dataset/GTVp0604/traindatanii"   # trainnii数据文件夹
-    save_dir = '/home/intern/wusi/Dataset/GTVp0604/trainresults_kfold'    # 训练结果保存文件夹
+    root_dir = '/home/intern/wusi/SAMdata/20250711/train'  # traindataset的目录
+    csv_path = '/home/intern/wusi/SAMdata/20250711/train/train_rgb.csv'
+    nii_dir = "/home/intern/wusi/SAMdata/20250711/train_nii"  # trainnii数据文件夹
+    save_dir = '/home/intern/wusi/SAMdata/20250711/trainresult_TrainAll'  # 训练结果保存文件夹
     os.makedirs(save_dir, exist_ok=True)
 
 
@@ -243,7 +252,7 @@ if __name__ == '__main__':
     sam_checkpoint = "/home/intern/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
     model_type = "vit_b"
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     torch.backends.cudnn.benchmark = True
     torch.cuda.empty_cache()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -251,9 +260,9 @@ if __name__ == '__main__':
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
     for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
-        # # 只训练第4折和5折
-        # if fold not in [0]:
-        #     continue
+        # 只训练第4折和5折
+        # if fold not in [2]:
+            # continue
 
         # Logging setup
         log_path = os.path.join(save_dir, f'fold_{fold + 1}/train_fold{fold + 1}.log')
@@ -279,13 +288,13 @@ if __name__ == '__main__':
         logging.info(f"[Info] Loaded SAM checkpoint from {sam_checkpoint} with strict=False.")
         net.to(device)
 
-        # # 冻结图像编码器
+        # 冻结图像编码器
         # for param in net.image_encoder.parameters():
-        #     param.requires_grad = False
-        #
-        # # 冻结解码器
+            # param.requires_grad = False
+        
+        # 冻结解码器
         # for param in net.mask_decoder.parameters():
-        #     param.requires_grad = False
+            # param.requires_grad = False
 
         trainable_params = [name for name, param in net.named_parameters() if param.requires_grad]
         logging.info(f"Trainable parameters ({len(trainable_params)}):")
