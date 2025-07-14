@@ -9,7 +9,7 @@ import SimpleITK as sitk
 
 
 class TestDataset(Dataset):
-    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_pixel=0):
+    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_pixel):
         self.df = pd.read_csv(csv_path, header=None, names=["image", "mask"])
         self.root_dir = root_dir
         self.nii_dir = nii_dir

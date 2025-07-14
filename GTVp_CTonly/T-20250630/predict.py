@@ -1,6 +1,10 @@
+"""
+生成预测_00N.nii.gz
+"""
+
 import csv
-import os
 import imageio
+import os
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -18,17 +22,17 @@ device = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 net = sam_model_registry[model_type](checkpoint=None)
 net.to(device)
 net.load_state_dict(torch.load(sam_checkpoint, map_location=device), strict=False)
-net.load_state_dict(torch.load("C:/Users/dell/Desktop/SAM/GTVp_CTonly/20250604/trainresults_kfold_alltrain/fold_4/weights/best.pth", map_location=device))
+net.load_state_dict(torch.load("D:\SAM\GTVp_CTonly/20250630/trainresults_kfold_freeze_encoder_decoder/fold_1\weights/best.pth", map_location=device))
 net.eval()
 
 # ========== 路径配置 ==========
-csv_path = "C:/Users/dell/Desktop/20250707/dataset/test/test_rgb_dataset.csv"  # 测试数据CSV
-root_dir = "C:/Users/dell/Desktop/20250707/dataset/test"      # 测试集文件
-image_dir = "C:/Users/dell/Desktop/20250707/dataset/test/rgb_images"   # 测试image
-nii_dir = "C:/Users/dell/Desktop/20250707/datanii/test_nii"   # 测试集nii文件
-test_dir = "C:/Users/dell/Desktop/testresults/TrainAll/test_0_pixel"   # 测试结果保存
-png_dir = os.path.join(test_dir, "tmp_png")   # 临时保存 PNG
-nii_out_dir = os.path.join(test_dir, "nii_pred")
+csv_path = "D:\SAM\GTVp_CTonly/20250707\dataset/test/test_rgb_dataset.csv"
+root_dir = "D:\SAM\GTVp_CTonly/20250707\dataset/test"
+image_dir = "D:\SAM\GTVp_CTonly/20250707\dataset/test/rgb_images"
+nii_dir = "D:\SAM\GTVp_CTonly/20250707/datanii/test_nii"
+test_dir = "D:/SAM/GTVp_CTonly/20250707/Freeze_encoder_decoder"    # 测试结果保存地址
+png_dir = os.path.join(test_dir, "tmp_png") # 临时保存 PNG
+nii_out_dir = os.path.join(test_dir, "test_0_pixel")
 os.makedirs(png_dir, exist_ok=True)
 os.makedirs(nii_out_dir, exist_ok=True)
 
@@ -133,12 +137,15 @@ vis_dir = nii_out_dir   # pred_nii拟储存目录
 all_slice_mappings = []
 
 for pa in os.listdir(datanii_dir):
+    print(pa)
+    nid = pa.split('_', -1)[-1]
     pa_path = os.path.join(datanii_dir, pa)
     image_nii_path = os.path.join(pa_path, "image.nii.gz")
     pre_png_dir = os.path.join(pred_dir, pa)
-    output_dir = os.path.join(vis_dir, pa)
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "pred.nii.gz")
+    # output_dir = os.path.join(vis_dir, pa)
+    # os.makedirs(output_dir, exist_ok=True)
+    # output_path = os.path.join(output_dir, "pred.nii.gz")
+    output_path = os.path.join(vis_dir, f"pred_{int(nid):03d}.nii.gz")
     pngs_to_nii(
     png_dir=pre_png_dir,
     reference_nii_path=image_nii_path,

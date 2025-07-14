@@ -1,4 +1,8 @@
 import os
+import sys
+sys.path.append("/home/wusi/segment-anything")
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import re
 import csv
 import torch
@@ -14,18 +18,19 @@ import shutil
 
 # ========= 配置路径（请根据实际路径修改） =========
 fold_ckpts = [
-    "fold_0/best.pth",                      # 每个fold的best权重路径
-    "fold_1/best.pth",
-    "fold_2/best.pth",
-    "fold_3/best.pth",
-    "fold_4/best.pth"
+    "/home/wusi/SAMdata/20250711/trainresult_Freeze_mask_decoder/fold_1/weights/best.pth",                      # 每个fold的best权重路径
+    "/home/wusi/SAMdata/20250711/trainresult_Freeze_mask_decoder/fold_2/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/trainresult_Freeze_mask_decoder/fold_3/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/trainresult_Freeze_mask_decoder/fold_4/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/trainresult_Freeze_mask_decoder/fold_5/weights/best.pth"
 ]
-sam_checkpoint = "your_base_sam_checkpoint.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
+sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
 model_type = "vit_b"
-csv_path = "C:/Users/dell/Desktop/20250707/dataset/test/test_rgb_dataset.csv"   # 测试数据CSV文件路径
-root_dir = "C:/Users/dell/Desktop/20250707/dataset/test"                         # 测试集根目录
-ii_dir = "C:/Users/dell/Desktop/20250707/datanii/test_nii"                      # 对应的参考NIfTI图像路径（含image.nii.gz）
-base_output_dir = "C:/Users/dell/Desktop/testresults/TrainAll/ensemble_pred_nii" # 预测输出结果根目录
+csv_path = "/home/wusi/SAMdata/20250711/test/test_rgb.csv"   # 测试数据CSV文件路径
+root_dir = "/home/wusi/SAMdata/20250711/test"                         # 测试集根目录
+image_dir = "/home/wusi/SAMdata/20250711/test/rgb_images"             # 测试image
+ii_dir = "/home/wusi/SAMdata/20250711/test_nii"                      # 对应的参考NIfTI图像路径（含image.nii.gz）
+base_output_dir = "/home/wusi/SAMdata/20250711/testresults/Freeze_mask_decoder" # 预测输出结果根目录
 expand_pixel_list = [0, 3, 5, 7, 9]  # 不同外扩像素值
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -76,7 +81,7 @@ for expand_pixel in expand_pixel_list:
             avg_prob = torch.mean(torch.stack(prob_list, dim=0), dim=0)
             final_mask = (avg_prob > 0.5).float()
 
-            rel_path = os.path.relpath(image_path[0], os.path.join(root_dir, "rgb_images"))  # 确认image地址
+            rel_path = os.path.relpath(image_path[0], os.path.join(root_dir, image_dir))  # 确认image地址
             patient_folder = Path(rel_path).parent.name
             image_stem = Path(rel_path).stem
             save_subdir = os.path.join(tmp_png_dir, patient_folder)
@@ -150,7 +155,6 @@ for expand_pixel in expand_pixel_list:
         pa_path = os.path.join(datanii_dir, pa)
         image_nii_path = os.path.join(pa_path, "image.nii.gz")
         pre_png_dir = os.path.join(pred_dir, pa)
-        output_dir = os.path.join(vis_dir, pa)
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"GTVp_{idx}.nii.gz")
         pngs_to_nii(

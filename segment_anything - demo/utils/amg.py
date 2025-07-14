@@ -113,7 +113,7 @@ def mask_to_rle_pytorch(tensor: torch.Tensor) -> List[Dict[str, Any]]:
     b, h, w = tensor.shape
     tensor = tensor.permute(0, 2, 1).flatten(1)
 
-    # Compute change indices
+    # Compute T-20250630 indices
     diff = tensor[:, 1:] ^ tensor[:, :-1]
     change_indices = diff.nonzero()
 
