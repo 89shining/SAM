@@ -81,7 +81,7 @@ for expand_pixel in expand_pixel_list:
             avg_prob = torch.mean(torch.stack(prob_list, dim=0), dim=0)
             final_mask = (avg_prob > 0.5).float()
 
-            rel_path = os.path.relpath(image_path[0], os.path.join(root_dir, image_dir))  # 确认image地址
+            rel_path = os.path.relpath(image_path[0], image_dir)  # 确认image地址
             patient_folder = Path(rel_path).parent.name
             image_stem = Path(rel_path).stem
             save_subdir = os.path.join(tmp_png_dir, patient_folder)
