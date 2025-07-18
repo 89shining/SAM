@@ -29,7 +29,7 @@ def show_box(box, ax):
 
 
 # Example image
-image = cv2.imread('images/truck.jpg')
+image = cv2.imread('C:/Users\dell\Desktop/20250711\dataset/test/rgb_images\p_1/32.png')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 plt.figure(figsize=(10, 10))
@@ -44,8 +44,8 @@ import sys
 sys.path.append("..")
 from segment_anything import sam_model_registry, SamPredictor
 
-sam_checkpoint = "D:\\project\\segment-anything\\demo\\configs\\checkpoint\\sam_vit_h_4b8939.pth"
-model_type = "vit_h"
+sam_checkpoint = "D:\project\segment-anything\demo\configs\checkpoint\sam_vit_b_01ec64.pth"
+model_type = "vit_b"
 
 device = "cuda"
 
@@ -56,34 +56,80 @@ predictor = SamPredictor(sam)
 
 # Process the image to produce an image embedding by calling `SamPredictor.set_image`. `SamPredictor` remembers this embedding and will use it for subsequent mask prediction.
 predictor.set_image(image)
+#
+# # 单个点提示：input_point   input_label -> 输出多个mask
+# input_point = np.array([[250, 235]])
+# input_label = np.array([1])
+# plt.figure(figsize=(10, 10))
+# plt.imshow(image)
+# show_points(input_point, input_label, plt.gca())
+# plt.axis('on')
+# plt.show()
+# # Predict with `SamPredictor.predict`. The model returns masks, quality predictions for those masks, and low resolution mask logits that can be passed to the next iteration of prediction.
+# masks, scores, logits = predictor.predict(
+#     point_coords=input_point,
+#     point_labels=input_label,
+#     multimask_output=True,
+# )
+# # With `multimask_output=True` (the default setting), SAM outputs 3 masks, where `scores` gives the model's own estimation of the quality of these masks. This setting is intended for ambiguous input prompts, and helps the model disambiguate different objects consistent with the prompt. When `False`, it will return a single mask. For ambiguous prompts such as a single point, it is recommended to use `multimask_output=True` even if only a single mask is desired; the best single mask can be chosen by picking the one with the highest score returned in `scores`. This will often result in a better mask.
+# masks.shape  # (number_of_masks) x H x W
+# for i, (mask, score) in enumerate(zip(masks, scores)):
+#     plt.figure(figsize=(10, 10))
+#     plt.imshow(image)
+#     show_mask(mask, plt.gca())
+#     show_points(input_point, input_label, plt.gca())
+#     plt.title(f"Mask {i + 1}, Score: {score:.3f}", fontsize=18)
+#     plt.axis('off')
+#     plt.show()
 
-# 单个点提示：input_point   input_label -> 输出多个mask
-# To select the truck, choose a point on it. Points are input to the model in (x,y) format and come with labels 1 (foreground point) or 0 (background point). Multiple points can be input; here we use only one. The chosen point will be shown as a star on the image.
-input_point = np.array([[500, 375]])
+
+# # 单个框提示
+# input_box = np.array([230, 215, 270, 265])
+# plt.figure(figsize=(10, 10))
+# plt.imshow(image)
+# show_box(input_box, plt.gca())
+# plt.axis('on')
+# plt.show()
+# masks, scores, logits = predictor.predict(
+#     point_coords=None,
+#     point_labels=None,
+#     box=input_box[None, :],
+#     multimask_output=True,
+# )
+# masks.shape  # (number_of_masks) x H x W
+# for i, (mask, score) in enumerate(zip(masks, scores)):
+#     plt.figure(figsize=(10, 10))
+#     plt.imshow(image)
+#     show_mask(mask, plt.gca())
+#     show_box(input_box, plt.gca())
+#     plt.title(f"Mask {i + 1}, Score: {score:.3f}", fontsize=18)
+#     plt.axis('off')
+#     plt.show()
+
+# 点提示+框提示
+# Points and boxes may be combined, just by including both types of prompts to the predictor. Here this can be used to select just the trucks's tire, instead of the entire wheel.
+input_box = np.array([230, 215, 270, 265])
+input_point = np.array([[250, 235]])
 input_label = np.array([1])
-
 plt.figure(figsize=(10, 10))
 plt.imshow(image)
 show_points(input_point, input_label, plt.gca())
+show_box(input_box, plt.gca())
 plt.axis('on')
 plt.show()
-
-# Predict with `SamPredictor.predict`. The model returns masks, quality predictions for those masks, and low resolution mask logits that can be passed to the next iteration of prediction.
-masks, scores, logits = predictor.predict(
+masks,scores, logits = predictor.predict(
     point_coords=input_point,
     point_labels=input_label,
+    box=input_box,
     multimask_output=True,
 )
-
-# With `multimask_output=True` (the default setting), SAM outputs 3 masks, where `scores` gives the model's own estimation of the quality of these masks. This setting is intended for ambiguous input prompts, and helps the model disambiguate different objects consistent with the prompt. When `False`, it will return a single mask. For ambiguous prompts such as a single point, it is recommended to use `multimask_output=True` even if only a single mask is desired; the best single mask can be chosen by picking the one with the highest score returned in `scores`. This will often result in a better mask.
 masks.shape  # (number_of_masks) x H x W
-
 for i, (mask, score) in enumerate(zip(masks, scores)):
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
     show_mask(mask, plt.gca())
     show_points(input_point, input_label, plt.gca())
+    show_box(input_box, plt.gca())
     plt.title(f"Mask {i + 1}, Score: {score:.3f}", fontsize=18)
     plt.axis('off')
     plt.show()
-
