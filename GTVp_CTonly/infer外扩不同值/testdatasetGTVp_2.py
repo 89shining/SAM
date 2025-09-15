@@ -87,7 +87,7 @@ class TestDataset(Dataset):
         resized_mask = cv2.resize(mask.squeeze(0).numpy(), self.target_size, interpolation=cv2.INTER_NEAREST)
 
         # 计算spacing_x, spacing_y
-        image_rel_path = self.df.iloc[idx]['mask'].lstrip("/\\")  # "masks/p_0/34.nii"
+        image_rel_path = self.df.iloc[idx]['mask'].lstrip("/\\")  # "image/p_0/34.nii"
         patient_id = os.path.basename(os.path.dirname(image_rel_path))  # → "p_0"
         nii_path = os.path.join(self.nii_dir, patient_id, "GTVp.nii.gz")
         if not os.path.exists(nii_path):
