@@ -1,14 +1,13 @@
 """
-上下界 + 中间层，插值——外扩
-保存预测结果
+四边等距外扩固定值每层给框测试
 """
+
 
 import os
 import sys
 sys.path.append("/home/wusi/segment-anything")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import cv2
 import re
 import csv
 import torch
@@ -19,16 +18,16 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import DataLoader
 from segment_anything import sam_model_registry
-from testdatasetGTVp_3 import TestDataset
+from compare_testdataset import TestDataset
 import shutil
 
 # ========= 配置路径（请根据实际路径修改） =========
 fold_ckpts = [
-    "/home/wusi/SAMdata/20250711/trainresult_Freeze_image_encoder/fold_1/weights/best.pth",                      # 每个fold的best权重路径
-    "/home/wusi/SAMdata/20250711/trainresult_Freeze_image_encoder/fold_2/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/trainresult_Freeze_image_encoder/fold_3/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/trainresult_Freeze_image_encoder/fold_4/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/trainresult_Freeze_image_encoder/fold_5/weights/best.pth"
+    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_1/weights/best.pth",                      # 每个fold的best权重路径
+    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_2/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_3/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_4/weights/best.pth",
+    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_5/weights/best.pth"
 ]
 sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
 model_type = "vit_b"
@@ -36,13 +35,14 @@ csv_path = "/home/wusi/SAMdata/20250711/test/test_rgb.csv"   # 测试数据CSV�
 root_dir = "/home/wusi/SAMdata/20250711/test"                         # 测试集根目录
 image_dir = "/home/wusi/SAMdata/20250711/test/rgb_images"             # 测试image
 ii_dir = "/home/wusi/SAMdata/20250711/test_nii"                      # 对应的参考NIfTI图像路径（含image.nii.gz）
-base_output_dir = "/home/wusi/SAMdata/20250711/testresults/Prompt_maxarea" # 预测输出结果根目录
-expand_cm_list = [0.5]  # 外扩距离（单位：cm）
+base_output_dir = "/home/wusi/SAMdata/20250711/TestResults/cm/TrainAll" # 预测输出结果根目录
+expand_cm_list = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5]  # 不同外扩值
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 for expand_cm in expand_cm_list:
-    print(f"\n=== 正在处理外扩距离: {expand_cm} cm ===")
-    output_dir = os.path.join(base_output_dir, f"expand_{expand_cm:.1f}cm")
+    print(f"\n=== 正在处理外扩cm: {expand_cm} ===")
+    output_dir = os.path.join(base_output_dir, f"expand_{expand_cm}cm")
     os.makedirs(output_dir, exist_ok=True)
     tmp_png_dir = os.path.join(output_dir, "tmp_png")
     os.makedirs(tmp_png_dir, exist_ok=True)

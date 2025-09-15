@@ -42,7 +42,14 @@ class TestDataset(Dataset):
         bottom_z = valid_z[-1]
 
         sorted_indices = np.argsort(area_list)[::-1]  # 面积从大到小
-        for idx in sorted_indices:
+        #
+        """
+        从列表第 x 个开始取
+        [0:] —— 最大层
+        [1:] —— 第二大层
+        [2:] —— 第三大层
+        """
+        for idx in sorted_indices[0:]:
             candidate_z = valid_z[idx]
             if candidate_z != top_z and candidate_z != bottom_z:
                 mid_z = candidate_z
@@ -64,8 +71,39 @@ class TestDataset(Dataset):
         # 插值函数
         key_z = np.array(key_z_list)
         box_array = np.array([box_dict[z] for z in key_z_list])
+        """
+        f = interp1d(x, y, kind="linear", bounds_error=False, fill_value=np.nan, assume_sorted=False)
+
+        参数说明：
+            x: array_like
+                自变量（已知点坐标，通常为一维数组），最好是递增排列。
+            y: array_like
+                因变量（已知点对应的函数值，可以是多维数组）。
+            kind: str or int, optional
+                插值方式：
+                    "linear"    —— 线性插值（默认）
+                    "nearest"   —— 最近邻插值
+                    "zero"      —— 零阶保持（阶梯函数）
+                    "slinear"   —— 一次样条插值（等价于线性）
+                    "quadratic" —— 二次样条插值
+                    "cubic"     —— 三次样条插值
+                    int 值 n    —— n 次样条插值（如 n=1 等价 linear，n=3 等价 cubic）
+            bounds_error: bool, optional
+                是否在超出插值范围时报错：
+                    True  —— 如果 x_new 超出 [x.min(), x.max()]，直接报错
+                    False —— 不报错，返回 fill_value（默认）
+            fill_value: float, array_like or str, optional
+                超出 x 范围时返回的值：
+                    np.nan        —— 默认，返回 NaN
+                    "extrapolate" —— 允许外推（继续沿着边界趋势计算）
+                    标量或数组    —— 固定值替代
+            assume_sorted: bool, optional
+                默认 False，会检查 x 是否递增；
+                True 表示假设 x 已经排好序，可加快计算速度（不会重新检查）。
+        """
+
         interp_funcs = [
-            interp1d(key_z, box_array[:, i], kind="linear", fill_value="extrapolate")
+            interp1d(key_z, box_array[:, i], kind="linear", bounds_error=True, assume_sorted=False)
             for i in range(4)
         ]
 
