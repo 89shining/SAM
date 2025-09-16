@@ -41,21 +41,25 @@ class TestDataset(Dataset):
         top_z = valid_z[0]
         bottom_z = valid_z[-1]
 
-        sorted_indices = np.argsort(area_list)[::-1]  # 面积从大到小
-        #
+        # 构造中间层（排除 top 和 bottom）
+        middle_z_list = []
+        middle_area_list = []
+
+        for z, a in zip(valid_z, area_list):
+            if z != top_z and z != bottom_z:
+                middle_z_list.append(z)
+                middle_area_list.append(a)
+
+        # 排序中间层面积
+        sorted_indices = np.argsort(middle_area_list)[::-1]
+
+        # 选面积层
         """
-        从列表第 x 个开始取
-        [0:] —— 最大层
-        [1:] —— 第二大层
-        [2:] —— 第三大层
+        [0] —— 最大层
+        [1] —— 第二大层
+        [2] —— 第三大层
         """
-        for idx in sorted_indices[0:]:
-            candidate_z = valid_z[idx]
-            if candidate_z != top_z and candidate_z != bottom_z:
-                mid_z = candidate_z
-                break
-        else:
-            raise ValueError("找不到满足条件的中间层，建议检查 mask 数据")
+        mid_z = middle_z_list[sorted_indices[2]]
 
         key_z_list = [top_z, mid_z, bottom_z]
 
