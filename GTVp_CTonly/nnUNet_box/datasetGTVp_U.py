@@ -28,43 +28,8 @@ class SAMDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    # train box
-    # 1024 图像随机外扩框：四个方向不等随机外扩0-1cm
-    def get_box_train(self, resized_mask, spacing_x, spacing_y, max_expand_cm=1.0):
-        y_indices, x_indices = np.where(resized_mask > 0)
-        if len(x_indices) == 0 or len(y_indices) == 0:
-            return None
-        x_min = np.min(x_indices)
-        x_max = np.max(x_indices)
-        y_min = np.min(y_indices)
-        y_max = np.max(y_indices)
 
-        img_width = resized_mask.shape[1]  # W
-        img_height = resized_mask.shape[0]  # H
-
-        # 四个方向各自随机外扩 [0, max_expand_cm] cm
-        expand_left_cm = np.random.uniform(0, max_expand_cm)
-        expand_right_cm = np.random.uniform(0, max_expand_cm)
-        expand_top_cm = np.random.uniform(0, max_expand_cm)
-        expand_bottom_cm = np.random.uniform(0, max_expand_cm)
-
-        # 换算成像素数
-        expand_left_px = round(expand_left_cm / spacing_x)
-        expand_right_px = round(expand_right_cm / spacing_x)
-        expand_top_px = round(expand_top_cm / spacing_y)
-        expand_bottom_px = round(expand_bottom_cm / spacing_y)
-
-        # 应用扩展并裁剪边界
-        x_min = max(x_min - expand_left_px, 0)
-        x_max = min(x_max + expand_right_px, img_width - 1)
-        y_min = max(y_min - expand_top_px, 0)
-        y_max = min(y_max + expand_bottom_px, img_height - 1)
-
-        box = np.array([x_min, y_min, x_max, y_max]).astype(np.float32)
-        box_train = torch.tensor(box).unsqueeze(0)
-        return box_train
-
-    # validation box
+    # box
     # 1024 图像固定四方向外扩5mm
     def get_box_val(self, resized_mask, spacing_x, spacing_y, expand_cm=0.5):
         y_indices, x_indices = np.where(resized_mask > 0)
