@@ -155,7 +155,7 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
         LOSS = []
         val_n_loss = 0
         with torch.no_grad():
-            with tqdm(total=len(val_loader), desc=f'[Train Fold {fold + 1}]', unit='batch', disable=True) as pbar:
+            with tqdm(total=len(val_loader), desc=f'[Val Fold {fold + 1}]', unit='batch', disable=True) as pbar:
                 # 传入一个batch
                 for batch_idx, batch in enumerate(val_loader):
                     imgs = batch['image'].to(device)
