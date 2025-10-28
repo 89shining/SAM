@@ -1,7 +1,7 @@
 """
-上下界 + 中间层提示数目
-总提示数目：2 3 5
+上下界框 + 体积中心层
 """
+
 
 import os
 import cv2
@@ -15,20 +15,19 @@ from scipy.interpolate import interp1d
 
 
 class TestDataset(Dataset):
-    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_cm, num_prompts):
+    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_cm):
         self.df = pd.read_csv(csv_path, header=None, names=["image", "mask"])
         self.root_dir = root_dir
         self.nii_dir = nii_dir
         self.target_size = target_size
         self.expand_cm = expand_cm
-        self.num_prompts = num_prompts
 
     def __len__(self):
         return len(self.df)
 
     # 框插值函数，返回每层的box
-    # 原图尺寸先外扩0.5cm——再插值
-    def get_box_interp(self, mask_np, spacing, expand_cm, num_prompts):
+    # 原图尺寸先外扩0.5cm——插值
+    def get_box_interp(self, mask_np, spacing, expand_cm):
         Z, H, W = mask_np.shape
 
         # 找出有mask的层
@@ -40,22 +39,39 @@ class TestDataset(Dataset):
                 valid_z.append(z)
                 area_list.append(area)
 
-        if len(valid_z) < 2:
-            raise ValueError("有效层不足2层，无法插值")
+        if len(valid_z) < 3:
+            raise ValueError("有效层不足3层，无法插值")
 
-        # 根据总层数 N 和提示层数 k 计算等间距索引
-        N = len(valid_z)
-        if num_prompts >= N:
-            key_z_list = valid_z
-        else:
-            # 取层范围：(0, N-1], 数目 num_prompts， 均匀取整（向下取整）
-            key_idx = np.linspace(0, N - 1, num_prompts, dtype=int)
-            key_z_list = [valid_z[i] for i in key_idx]
+        # 提取 top / bottom / max-area 层
+        top_z = valid_z[0]
+        bottom_z = valid_z[-1]
+
+        # 构造中间层（排除 top 和 bottom）
+        middle_z_list = []
+        middle_area_list = []
+
+        for z, a in zip(valid_z, area_list):
+            if z != top_z and z != bottom_z:
+                middle_z_list.append(z)
+                middle_area_list.append(a)
+
+        # 体积加权中心层选取逻辑
+        # 计算累积面积
+        cum_area = np.cumsum(area_list)
+        total_area = cum_area[-1]
+        half_area = total_area / 2.0
+
+        # 找到累计面积首次超过一半的位置
+        mid_idx = np.searchsorted(cum_area, half_area)
+        mid_z = valid_z[mid_idx]
+
+        key_z_list = [top_z, mid_z, bottom_z]
 
         # 计算外扩像素换算
         expand_x = (expand_cm * 10) / spacing[0]  # mm → cm，x方向
         expand_y = (expand_cm * 10) / spacing[1]  # mm → cm，y方向
 
+        # 提取三个框
         box_dict = {}
         for z in key_z_list:
             mask = mask_np[z]
@@ -104,8 +120,7 @@ class TestDataset(Dataset):
         """
 
         interp_funcs = [
-            interp1d(key_z, box_array[:, i], kind="linear",
-                     bounds_error=True, assume_sorted=False)
+            interp1d(key_z, box_array[:, i], kind="linear", bounds_error=True, assume_sorted=False)
             for i in range(4)
         ]
 
@@ -115,6 +130,7 @@ class TestDataset(Dataset):
         for z in valid_z:
             box = [float(f(z)) for f in interp_funcs]
             box = [int(round(b)) for b in box]
+
             x0, y0, x1, y1 = box
             x0 = max(0, x0)
             y0 = max(0, y0)
@@ -159,7 +175,7 @@ class TestDataset(Dataset):
 
 
         # 获取该层插值box
-        all_box_dict = self.get_box_interp(mask_np, spacing, self.expand_cm, self.num_prompts)   # 512 mask_np
+        all_box_dict = self.get_box_interp(mask_np, spacing, self.expand_cm)   # 512 mask_np
         box_xyxy = all_box_dict[current_slice]  # [x0,y0,x1,y1]
 
         # 映射到 target_size
