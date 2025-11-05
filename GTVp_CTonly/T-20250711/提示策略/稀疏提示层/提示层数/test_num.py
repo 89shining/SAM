@@ -17,7 +17,7 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import DataLoader
 from segment_anything import sam_model_registry
-from testdatasetGTVp_n import TestDataset
+from testdatasetGTVp_num import TestDataset
 import shutil
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -129,36 +129,49 @@ def visualize_prediction_original_scale(image_1024, gt_mask, pred_mask, box_1024
 
 # ========= 配置路径（请根据实际路径修改） =========
 fold_ckpts = [
-    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_Freeze_image_encoder/fold_1/weights/best.pth",                      # 每个fold的best权重路径
-    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_Freeze_image_encoder/fold_2/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_Freeze_image_encoder/fold_3/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_Freeze_image_encoder/fold_4/weights/best.pth",
-    "/home/wusi/SAMdata/20250711/TrainResults/trainresult_Freeze_image_encoder/fold_5/weights/best.pth"
+    # "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_Freeze_image_encoder/fold_1/weights/best.pth",                      # 每个fold的best权重路径
+    # "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_Freeze_image_encoder/fold_2/weights/best.pth",
+    # "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_Freeze_image_encoder/fold_3/weights/best.pth",
+    "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_Freeze_image_encoder/fold_4/weights/best.pth",
+    # "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_Freeze_image_encoder/fold_5/weights/best.pth"
 ]
 sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
 model_type = "vit_b"
-csv_path = "/home/wusi/SAMdata/20250711/test/test_rgb.csv"   # 测试数据CSV文件路径
-root_dir = "/home/wusi/SAMdata/20250711/test"                         # 测试集根目录
-image_dir = "/home/wusi/SAMdata/20250711/test/rgb_images"             # 测试image
-ii_dir = "/home/wusi/SAMdata/20250711/test_nii"                      # 对应的参考NIfTI图像路径（含image.nii.gz）
-base_output_dir = "/home/wusi/SAMdata/20250711/TestResults/Num_box_prompts" # 预测输出结果根目录
+csv_path = "/home/wusi/SAMdata/20250711_GTVp/dataset/test/test_rgb.csv"   # 测试数据CSV文件路径
+root_dir = "/home/wusi/SAMdata/20250711_GTVp/dataset/test"              # 测试集根目录
+image_dir = "/home/wusi/SAMdata/20250711_GTVp/dataset/test/rgb_images"   # 测试image
+ii_dir = "/home/wusi/SAMdata/20250711_GTVp/datanii/test_nii"          # 对应的参考NIfTI图像路径（含image.nii.gz）           # 对应的参考NIfTI图像路径（含image.nii.gz）
+base_output_dir = "/home/wusi/SAMdata/20251104_GTVp/TestResults/Num_box_prompts" # 预测输出结果根目录
 expand_cm_list = [0.5]  # 外扩距离（单位：cm）
-num_prompts_list = [2, 3, 5]
+num_prompts_list = [2, 3, 5, 7]
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+print("\n======================= SAM 测试配置 =======================")
+print("使用的模型权重路径:")
+for ckpt in fold_ckpts:
+    print(f"  - {ckpt}")
+# print(f"使用的SAM基础权重: {sam_checkpoint}")
+print(f"结果保存根目录: {base_output_dir}")
+print("==============================================================\n")
 
 for expand_cm in expand_cm_list:
     print(f"\n=== 正在处理外扩距离: {expand_cm} cm ===")
     for num_prompts in num_prompts_list:
         print(f"\n=== 提示层数: {num_prompts} 层 ===")
-        output_dir = os.path.join(base_output_dir, f"expand_{expand_cm:.1f}cm",  f"prompt_{num_prompts}_vis")
+        output_dir = os.path.join(base_output_dir, f"{num_prompts}_slices")
         os.makedirs(output_dir, exist_ok=True)
         tmp_png_dir = os.path.join(output_dir, "tmp_png")
         os.makedirs(tmp_png_dir, exist_ok=True)
 
         # ========= 数据加载 =========
-        test_dataset = TestDataset(csv_path=csv_path, root_dir=root_dir, nii_dir=ii_dir, target_size=(1024, 1024),
-                                   expand_cm=expand_cm,
-                                   num_prompts=num_prompts)
+        test_dataset = TestDataset(
+            csv_path=csv_path,
+            root_dir=root_dir,
+            nii_dir=ii_dir,
+            target_size=(1024, 1024),
+            expand_cm=expand_cm,
+            num_prompts=num_prompts)
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         # ========= 加载模型 =========

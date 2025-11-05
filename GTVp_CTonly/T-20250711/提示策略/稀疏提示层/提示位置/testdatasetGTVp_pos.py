@@ -1,5 +1,5 @@
 """
-上下界框 + 中间随机层
+上下界框 + 索引中心层/中间面积最大层/体积中心层/中间随机层
 """
 
 
@@ -16,19 +16,21 @@ from scipy.interpolate import interp1d
 
 
 class TestDataset(Dataset):
-    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_cm):
+    def __init__(self, csv_path, root_dir, nii_dir, target_size, expand_cm, prompt_mode, random_offset):
         self.df = pd.read_csv(csv_path, header=None, names=["image", "mask"])
         self.root_dir = root_dir
         self.nii_dir = nii_dir
         self.target_size = target_size
         self.expand_cm = expand_cm
+        self.prompt_mode = prompt_mode
+        self.random_offset = random_offset
 
     def __len__(self):
         return len(self.df)
 
     # 框插值函数，返回每层的box
     # 原图尺寸先外扩0.5cm——插值
-    def get_box_interp(self, mask_np, spacing, expand_cm, patient_id):
+    def get_box_interp(self, mask_np, spacing, patient_id, expand_cm, prompt_mode):
         Z, H, W = mask_np.shape
 
         # 找出有mask的层
@@ -43,13 +45,58 @@ class TestDataset(Dataset):
         if len(valid_z) < 3:
             raise ValueError("有效层不足3层，无法插值")
 
-        # 提取 top / bottom / max-area 层
+        # 提取 top / bottom  层
         top_z = valid_z[0]
         bottom_z = valid_z[-1]
 
+        # ==========================
+        # 根据提示模式选择中间层
+        # ==========================
+
+        # 选索引z中心层
+        if prompt_mode == "middle_z":
+            # 向下取整
+            mid_idx = len(valid_z) // 2
+            mid_z = valid_z[mid_idx]
+
+        # 选中间区域面积最大层
+        elif prompt_mode == "max_area":
+            # 构造中间层（排除 top 和 bottom）
+            middle_z_list = []
+            middle_area_list = []
+            for z, a in zip(valid_z, area_list):
+                if z != top_z and z != bottom_z:
+                    middle_z_list.append(z)
+                    middle_area_list.append(a)
+            # 排序中间层面积
+            sorted_indices = np.argsort(middle_area_list)[::-1]
+            # 选面积层
+            """
+            [0] —— 最大层
+            [1] —— 第二大层
+            [2] —— 第三大层
+            """
+            mid_z = middle_z_list[sorted_indices[0]]
+
+        # 选体积中心层（50%体积层）
+        elif prompt_mode == "mid_volume":
+            # 计算累积面积
+            cum_area = np.cumsum(area_list)
+            total_area = cum_area[-1]
+            half_area = total_area / 2.0
+            # 找到累计面积首次超过一半的位置
+            mid_idx = np.searchsorted(cum_area, half_area)
+            mid_z = valid_z[mid_idx]
+
         # 随机选择中间层（排除上下界）
-        random.seed(hash(patient_id) % 10000)  # 保证同一患者随机层固定
-        mid_z = random.choice(valid_z[1:-1])
+        elif prompt_mode == "random":
+            random.seed((hash(patient_id) + self.random_offset) % 10000)
+            mid_z = random.choice(valid_z[1:-1])
+
+        else:
+            raise ValueError(f"Unknown prompt_mode: {prompt_mode}")
+
+
         key_z_list = [top_z, mid_z, bottom_z]
 
         # 计算外扩像素换算
@@ -160,7 +207,7 @@ class TestDataset(Dataset):
 
 
         # 获取该层插值box
-        all_box_dict = self.get_box_interp(mask_np, spacing, self.expand_cm, patient_id)   # 512 mask_np
+        all_box_dict = self.get_box_interp(mask_np, spacing, patient_id, self.expand_cm, self.prompt_mode)   # 512 mask_np
         box_xyxy = all_box_dict[current_slice]  # [x0,y0,x1,y1]
 
         # 映射到 target_size
