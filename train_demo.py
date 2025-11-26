@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 from segment_anything import sam_model_registry
-from dataset.dataset_box import CustomDataset
+from Mycodes.dataset.dataset_box import CustomDataset
 from Mycodes.dice_loss import BCEDiceLoss
 import gc
 

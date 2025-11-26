@@ -12,12 +12,11 @@ import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import KFold
-from matplotlib.ticker import MaxNLocator
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
-from GTVnd.dice_loss import BCEDiceLoss
-from GTVnd.datasetGTVnd import SAMDataset
+from Rectal.GTVnd.dice_loss import BCEDiceLoss
+from Rectal.GTVnd.datasetGTVnd import SAMDataset
 from segment_anything import sam_model_registry
 
 

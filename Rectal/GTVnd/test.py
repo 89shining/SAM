@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from testdatasetGTVnd import TestDataset
 from segment_anything import sam_model_registry
-from GTVnd.dice_loss import dice_loss
+from Rectal.GTVnd.dice_loss import dice_loss
 
 
 sam_checkpoint = "D:\\project\\segment-anything\\demo\\configs\\checkpoint\\sam_vit_h_4b8939.pth"
