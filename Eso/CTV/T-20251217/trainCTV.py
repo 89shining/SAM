@@ -1,7 +1,8 @@
 # 五折交叉验证 GTVp训练
 import os
 import sys
-sys.path.append("/home/intern/wusi/segment-anything")
+sys.path.append("/home"
+                "/wusi/segment-anything")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import torch
@@ -240,17 +241,17 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
     writer.close()
 
 if __name__ == '__main__':
-    root_dir = '/home/intern/wusi/SAMdata/20250711/train'  # traindataset的目录
-    csv_path = '/home/intern/wusi/SAMdata/20250711/train/train_rgb.csv'
-    nii_dir = "/home/intern/wusi/SAMdata/20250711/train_nii"  # trainnii数据文件夹
-    save_dir = '/home/intern/wusi/SAMdata/20250711/trainresult_TrainAll'  # 训练结果保存文件夹
+    root_dir = '/home/wusi/SAMdata/Eso-CTV/20251217/dataset/train'  # traindataset的目录
+    csv_path = '/home/wusi/SAMdata/Eso-CTV/20251217/dataset/train/train_rgb.csv'
+    nii_dir = "/home/wusi/SAMdata/Eso-CTV/20251217/datanii/train_nii"  # trainnii数据文件夹
+    save_dir = '/home/wusi/SAMdata/Eso-CTV/20251217/TrainResult'  # 训练结果保存文件夹
     os.makedirs(save_dir, exist_ok=True)
 
 
     dataset = SAMDataset(csv_path=csv_path, root_dir=root_dir, nii_dir = nii_dir, target_size=(1024, 1024))
     all_image_paths = pd.read_csv(csv_path, header=None, names=["image", "mask"])["image"].tolist()
 
-    sam_checkpoint = "/home/intern/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
+    sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
     model_type = "vit_b"
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
@@ -305,7 +306,7 @@ if __name__ == '__main__':
             # print(name)
 
         train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, device,
-                       epochs=200, batch_size=2, lr=0.001, save_dir=save_dir)
+                       epochs=200, batch_size=8, lr=0.001, save_dir=save_dir)
         logging.info(f"Training Fold{fold + 1} completed.")
 
         torch.cuda.empty_cache()

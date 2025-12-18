@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import DataLoader
 from segment_anything import sam_model_registry
-from testdataset_cm import TestDataset
+from testdatasetCTV import TestDataset
 import shutil
 
 # ========= 配置路径（请根据实际路径修改） =========
@@ -31,12 +31,12 @@ fold_ckpts = [
 ]
 sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
 model_type = "vit_b"
-csv_path = "/home/wusi/SAMdata/20250711_GTVp/dataset/test/test_rgb.csv"   # 测试数据CSV文件路径
-root_dir = "/home/wusi/SAMdata/20250711_GTVp/dataset/test"              # 测试集根目录
-image_dir = "/home/wusi/SAMdata/20250711_GTVp/dataset/test/rgb_images"   # 测试image
-ii_dir = "/home/wusi/SAMdata/20250711_GTVp/datanii/test_nii"          # 对应的参考NIfTI图像路径（含image.nii.gz）
-base_output_dir = "/home/wusi/SAMdata/20251104_GTVp/TestResults/cm/TrainAll" # 预测输出结果根目录
-expand_cm_list = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5]  # 不同外扩值
+csv_path = "/home/wusi/SAMdata/Eso-CTV/20251217/dataset/test/test_rgb.csv"   # 测试数据CSV文件路径
+root_dir = "/home/wusi/SAMdata/Eso-CTV/20251217/dataset/test"              # 测试集dataset根目录
+image_dir = "/home/wusi/SAMdata/Eso-CTV/20251217/dataset/test/rgb_images"   # 测试image
+ii_dir = "/home/wusi/SAMdata/Eso-CTV/20251217/datanii/test_nii"          # 对应的参考NIfTI图像路径（含image.nii.gz）
+base_output_dir = "/home/wusi/SAMdata/Eso-CTV/20251217/TestResult" # 预测输出结果根目录
+expand_cm_list = [0.5]  # 不同外扩值
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
