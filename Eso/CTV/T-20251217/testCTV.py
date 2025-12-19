@@ -26,7 +26,7 @@ fold_ckpts = [
     # "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_1/weights/best.pth",                      # 每个fold的best权重路径
     # "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_2/weights/best.pth",
     # "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_3/weights/best.pth",
-    "/home/wusi/SAMdata/20250711_GTVp/TrainResults/trainresult_TrainAll/fold_4/weights/best.pth",
+    "/home/wusi/SAMdata/Eso-CTV/20251217/TrainResult/fold_3/weights/best.pth",
     # "/home/wusi/SAMdata/20250711/TrainResults/trainresult_TrainAll/fold_5/weights/best.pth"
 ]
 sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"  # 原始SAM模型权重路径（如sam_vit_b_01ec64.pth）
