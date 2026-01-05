@@ -50,7 +50,7 @@ plt.imshow(image)
 plt.axis('on')
 plt.show()
 
-
+# 点提示，单个前景点+多mask输出后选择score最大的mask
 # Selecting objects with SAM
 # First, load the SAM model and predictor. Change the path below to point to the SAM checkpoint. Running on CUDA and using the default model are recommended for best results.
 import sys
@@ -104,12 +104,13 @@ for i, (mask, score) in enumerate(zip(masks, scores)):
     plt.show()  
   
 
-
+# 迭代提示，用预测结果作为先验+新的点提示
 # Specifying a specific object with additional points
 # The single input point is ambiguous, and the model has returned multiple objects consistent with it. To obtain a single object, multiple points can be provided. If available, a mask from a previous iteration can also be supplied to the model to aid in prediction. When specifying a single object with multiple prompts, a single mask can be requested by setting `multimask_output=False`.
 input_point = np.array([[500, 375], [1125, 625]])
 input_label = np.array([1, 1])
 
+# 选择iou分数最高的mask用于再提示
 mask_input = logits[np.argmax(scores), :, :]  # Choose the model's best mask
 
 masks, _, _ = predictor.predict(
