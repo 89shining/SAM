@@ -118,7 +118,7 @@ class SAMDataset(Dataset):
         # 计算spacing_x, spacing_y
         image_rel_path = self.df.iloc[idx]['mask'].lstrip("/\\")   # masks/p_0/34.nii
         patient_id = os.path.basename(os.path.dirname(image_rel_path))  # → "p_0"
-        nii_path = os.path.join(self.nii_dir, patient_id, "GTVp.nii.gz")
+        nii_path = os.path.join(self.nii_dir, patient_id, "CTV.nii.gz")
         if not os.path.exists(nii_path):
             raise FileNotFoundError(f"Missing NIfTI image: {nii_path}")
         img_nii = sitk.ReadImage(nii_path)

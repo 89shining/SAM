@@ -1,11 +1,6 @@
-"""
-第一轮：box
-后续多轮预测mask迭代
-"""
-
-
 import os
 import sys
+
 sys.path.append("/home/wusi/segment-anything")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -21,9 +16,9 @@ from segment_anything import sam_model_registry
 from testdataset import TestDataset
 import shutil
 
-# ===================== 配置 =====================
+# ========= 配置路径 =========
 fold_ckpts = [
-    "/home/wusi/SAMdata/Eso/20260104_CTV/box_predmask/TrainResult/fold_3/weights/best.pth"
+    "/home/wusi/SAMdata/Eso/20260104_CTV/box_predmask/TrainResult/fold_3/weights/best.pth",
 ]
 
 sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
@@ -32,24 +27,22 @@ model_type = "vit_b"
 csv_path = "/home/wusi/SAMdata/Eso/20251217_CTV/dataset/test/test_rgb.csv"
 root_dir = "/home/wusi/SAMdata/Eso/20251217_CTV/dataset/test"
 image_dir = "/home/wusi/SAMdata/Eso/20251217_CTV/dataset/test/rgb_images"
-nii_dir = "/home/wusi/SAMdata/Eso/20260104_CTV/nnUNet_mask/cropdatanii/test_nii"
+ii_dir = "/home/wusi/SAMdata/Eso/20260104_CTV/nnUNet_mask/cropdatanii/test_nii"
 
 base_output_dir = "/home/wusi/SAMdata/Eso/20260104_CTV/box_predmask/multi-iter/TestResult"
 
 expand_cm_list = [0.5]
-num_iters = 3     # ⭐ 多轮迭代次数（1=只box，2=一次refine，>=3 多轮）
+num_iters = 2   # ⭐ 多轮迭代次数（2 = 与原始两轮代码等效）
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# =================================================
-
 print("\n======================= SAM 测试配置 =======================")
-print(f"迭代轮数 num_iters = {num_iters}")
+print(f"num_iters = {num_iters}")
 print(f"输出目录: {base_output_dir}")
 print("===========================================================\n")
 
 for expand_cm in expand_cm_list:
-    print(f"\n=== 外扩 {expand_cm} cm ===")
+    print(f"\n=== 正在处理外扩 {expand_cm} cm ===")
 
     output_dir = os.path.join(base_output_dir, f"expand_{expand_cm}cm_iter{num_iters}")
     os.makedirs(output_dir, exist_ok=True)
@@ -57,35 +50,32 @@ for expand_cm in expand_cm_list:
     tmp_png_dir = os.path.join(output_dir, "tmp_png")
     os.makedirs(tmp_png_dir, exist_ok=True)
 
-    # ================= Dataset =================
+    # ========= Dataset =========
     test_dataset = TestDataset(
         csv_path=csv_path,
         root_dir=root_dir,
-        nii_dir=nii_dir,
+        nii_dir=ii_dir,
         target_size=(1024, 1024),
         expand_cm=expand_cm
     )
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    # ================= Load models =================
+    # ========= Load model =========
     nets = []
     for ckpt in fold_ckpts:
         model = sam_model_registry[model_type](checkpoint=None)
         model.to(device)
-
         model.load_state_dict(torch.load(sam_checkpoint, map_location=device), strict=False)
         model.load_state_dict(torch.load(ckpt, map_location=device), strict=False)
-
         model.eval()
         nets.append(model)
 
-    # ================= 推理 =================
+    # ========= 推理 =========
     with torch.no_grad():
         for idx, (image, mask, box, original_size, image_path) in enumerate(test_loader):
 
             imgs = image.to(device).float()
             bbox = box.to(device).float()
-
             prob_list = []
 
             for net in nets:
@@ -93,14 +83,14 @@ for expand_cm in expand_cm_list:
                 input_images = torch.stack([net.preprocess(im) for im in imgs], dim=0)
                 image_embeddings = net.image_encoder(input_images)
 
+                # ===== 多轮迭代（box 始终存在）=====
                 prev_low_res = None
 
-                # ========= 多轮 mask refine =========
                 for it in range(num_iters):
                     sparse_embeddings, dense_embeddings = net.prompt_encoder(
                         points=None,
-                        boxes=bbox,
-                        masks=prev_low_res   # 第0轮 None，仅 box
+                        boxes=bbox,            # box 每一轮都存在
+                        masks=prev_low_res     # 第0轮为 None
                     )
 
                     low_res_masks, _ = net.mask_decoder(
@@ -113,7 +103,7 @@ for expand_cm in expand_cm_list:
 
                     prev_low_res = low_res_masks.detach()
 
-                # postprocess
+                # postprocess（只用最后一轮）
                 masks = net.postprocess_masks(
                     prev_low_res,
                     input_size=imgs.shape[-2:],
@@ -135,15 +125,15 @@ for expand_cm in expand_cm_list:
             os.makedirs(save_subdir, exist_ok=True)
 
             save_path = os.path.join(save_subdir, image_stem + ".png")
-            save_mask = (final_mask[0].squeeze().cpu().numpy() > 0).astype(np.uint8) * 255
+            save_mask = (final_mask[0].squeeze().cpu().numpy() > 0.5).astype(np.uint8) * 255
             imageio.imwrite(save_path, save_mask)
 
-    # ================= PNG → NIfTI =================
+    # ========= PNG → NIfTI =========
     def pngs_to_nii(png_dir, reference_nii_path, output_nii_path):
         ref = nib.load(reference_nii_path)
         affine = ref.affine
         header = ref.header
-        shape = ref.shape  # (H,W,D)
+        shape = ref.shape  # (H, W, D)
 
         volume = np.zeros((shape[2], shape[0], shape[1]), dtype=np.uint8)
 
@@ -161,13 +151,13 @@ for expand_cm in expand_cm_list:
         volume = np.transpose(volume, (1, 2, 0))
         nib.save(nib.Nifti1Image(volume, affine, header), output_nii_path)
 
-    for pa in os.listdir(nii_dir):
+    for pa in os.listdir(ii_dir):
         match = re.search(r'\d+', pa)
         if not match:
             continue
 
         idx = match.group(0).zfill(3)
-        ref_nii = os.path.join(nii_dir, pa, "image.nii.gz")
+        ref_nii = os.path.join(ii_dir, pa, "image.nii.gz")
         png_dir = os.path.join(tmp_png_dir, pa)
 
         out_nii = os.path.join(output_dir, f"CTV_{idx}.nii.gz")

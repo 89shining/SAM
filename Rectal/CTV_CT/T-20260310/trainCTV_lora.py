@@ -1,7 +1,8 @@
-# 五折交叉验证 GTVp训练
+# 五折交叉验证 CTV训练
 import os
 import sys
-sys.path.append("/home/intern/wusi/segment-anything")
+
+sys.path.append("/home/wusi/segment-anything")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import torch
@@ -13,12 +14,20 @@ import matplotlib.pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import KFold
+from matplotlib.ticker import MaxNLocator
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from dice_loss import BCEDiceLoss
-from pseudo_datasetGTVp import SAMDataset
+from pseudo_datasetCTV import SAMDataset
 from segment_anything import sam_model_registry
+from Mycodes.sam_lora import (
+    inject_lora_to_sam_image_encoder,
+    freeze_image_encoder_except_lora,
+    unfreeze_mask_decoder,
+    unfreeze_prompt_encoder,
+    print_trainable_parameters,
+)
 
 # 设置随机种子
 manual_seed = int.from_bytes(os.urandom(4), 'little')
@@ -36,8 +45,8 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
     # 日志记录
     logging.info(f'Auto-generated seed: {manual_seed}')
 
-    train_ids = [all_image_paths[i].replace('/images/', '').replace('.tiff', '').replace('.tif', '') for i in train_idx]
-    val_ids = [all_image_paths[i].replace('/images/', '').replace('.tiff', '').replace('.tif', '') for i in val_idx]
+    train_ids = [all_image_paths[i].replace('/pseudo_rgb_images/', '').replace('.png', '') for i in train_idx]
+    val_ids = [all_image_paths[i].replace('/pseudo_rgb_images/', '').replace('.png', '') for i in val_idx]
 
     with open(os.path.join(fold_dir, 'train_ids.txt'), 'w') as f:
         f.writelines(f"{id}\n" for id in train_ids)
@@ -237,21 +246,21 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
     plt.close()
     writer.close()
 
+
 if __name__ == '__main__':
-    root_dir = '/home/intern/wusi/Dataset/GTVp0604/dataset/train'  # traindataset的目录
-    csv_path = '/home/intern/wusi/Dataset/GTVp0604/dataset/train/pseudo_rgb_dataset.csv'
-    nii_dir = "/home/intern/wusi/Dataset/GTVp0604/traindatanii"  # trainnii数据文件夹
-    save_dir = '/home/intern/wusi/Dataset/GTVp0604/trainresults_kfold_pseudoRGB'  # 训练结果保存文件夹
+    root_dir = '/home/wusi/SAMdata/Rectal/20260310_CTV/dataset/train'  # traindataset的目录
+    csv_path = '/home/wusi/SAMdata/Rectal/20260310_CTV/dataset/train/train_pseudo_rgb.csv'
+    nii_dir = "/home/wusi/SAMdata/Rectal/20260310_CTV/datanii/train_nii"  # trainnii数据文件夹
+    save_dir = '/home/wusi/SAMdata/Rectal/20260310_CTV/trainresult_3slices/freeze_img_lora'  # 训练结果保存文件夹
     os.makedirs(save_dir, exist_ok=True)
 
-
-    dataset = SAMDataset(csv_path=csv_path, root_dir=root_dir, nii_dir = nii_dir, target_size=(1024, 1024))
+    dataset = SAMDataset(csv_path=csv_path, root_dir=root_dir, nii_dir=nii_dir, target_size=(1024, 1024))
     all_image_paths = pd.read_csv(csv_path, header=None, names=["image", "mask"])["image"].tolist()
 
-    sam_checkpoint = "/home/intern/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
+    sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
     model_type = "vit_b"
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "6"
     torch.backends.cudnn.benchmark = True
     torch.cuda.empty_cache()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -259,9 +268,9 @@ if __name__ == '__main__':
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
     for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
-        # 只训练第1折
-        if fold not in [0]:
-            continue
+        # 只训练第4折和5折
+        # if fold not in [2]:
+        # continue
 
         # Logging setup
         log_path = os.path.join(save_dir, f'fold_{fold + 1}/train_fold{fold + 1}.log')
@@ -285,15 +294,21 @@ if __name__ == '__main__':
         state_dict = torch.load(sam_checkpoint, map_location=device)
         net.load_state_dict(state_dict, strict=False)
         logging.info(f"[Info] Loaded SAM checkpoint from {sam_checkpoint} with strict=False.")
-        net.to(device)
+        # 注入 LoRA
+        net = inject_lora_to_sam_image_encoder(net, r=4, alpha=8)
 
-        # # 冻结图像编码器
-        # for param in net.image_encoder.parameters():
-        #     param.requires_grad = False
-        #
-        # # 冻结解码器
-        # for param in net.mask_decoder.parameters():
-        #     param.requires_grad = False
+        # 冻结 image encoder，只保留 LoRA 可训练
+        freeze_image_encoder_except_lora(net)
+
+        # 建议训练 mask decoder
+        unfreeze_mask_decoder(net)
+
+        # prompt encoder 训练
+        unfreeze_prompt_encoder(net)
+
+        net.to(device)
+        net.train()
+
 
         trainable_params = [name for name, param in net.named_parameters() if param.requires_grad]
         logging.info(f"Trainable parameters ({len(trainable_params)}):")
@@ -303,7 +318,7 @@ if __name__ == '__main__':
             # print(name)
 
         train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, device,
-                       epochs=150, batch_size=2, lr=0.001, save_dir=save_dir)
+                       epochs=100, batch_size=8, lr=0.0001, save_dir=save_dir)
         logging.info(f"Training Fold{fold + 1} completed.")
 
         torch.cuda.empty_cache()
