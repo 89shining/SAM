@@ -74,7 +74,10 @@ class SAMTestDatasetFromNiiGz(Dataset):
     def get_box(self, resized_mask, spacing_x, spacing_y, expand_cm):
         y_indices, x_indices = np.where(resized_mask > 0)
         if len(x_indices) == 0 or len(y_indices) == 0:
-            return None
+            # Fallback box to avoid DataLoader collate crash when prompt mask is empty.
+            img_height, img_width = resized_mask.shape[:2]
+            box = np.array([0, 0, img_width - 1, img_height - 1], dtype=np.float32)
+            return torch.tensor(box).unsqueeze(0)
         x_min = np.min(x_indices)
         x_max = np.max(x_indices)
         y_min = np.min(y_indices)

@@ -1,5 +1,6 @@
-"""
-nnUNet的mask外接Box作为输入提示
+﻿"""
+nnUNet mask external box prompt input.
+Optimized: patient-level volume cache + robust fallback box.
 """
 
 import os
@@ -22,11 +23,12 @@ def window_level_transform(img, window_center=40, window_width=400):
 
 class SAMDatasetFromNiiGz(Dataset):
     """
-    直接从 3D nii.gz 生成 slice 级样本（仅 GT 非空切片）。
-    返回：
+    Build slice-level samples from 3D nii.gz volumes (only GT-positive slices).
+
+    Returns:
       image: float32 [3, 1024, 1024], 0-255
-      GT:    float32 [1, H, W]        (保持原始尺寸，不 resize)
-      Box: [1，4], 1024尺寸
+      GT: float32 [1, H, W] (original size)
+      box: float32 [1, 4] on resized (1024) image space
     """
 
     def __init__(
@@ -38,6 +40,7 @@ class SAMDatasetFromNiiGz(Dataset):
         image_name="image.nii.gz",
         gt_name="CTV.nii.gz",
         nnunet_name="nnunet_pred.nii.gz",
+        expand_cm=0.0,
     ):
         self.nii_root_dir = nii_root_dir
         self.target_image_size = target_image_size
@@ -46,21 +49,31 @@ class SAMDatasetFromNiiGz(Dataset):
         self.image_name = image_name
         self.gt_name = gt_name
         self.nnunet_name = nnunet_name
+        self.expand_cm = float(expand_cm)
 
-        # 建立 (patient_id, slice_idx) 的索引列表：只保留 GT 非空切片
         self.index = []
         self.patients = sorted(
             [d for d in os.listdir(nii_root_dir) if os.path.isdir(os.path.join(nii_root_dir, d))],
             key=lambda x: int(x.lstrip("p_")) if x.startswith("p_") and x.lstrip("p_").isdigit() else x
         )
 
+        self._paths = {}
         for pid in self.patients:
             pdir = os.path.join(self.nii_root_dir, pid)
-            gt_path = os.path.join(pdir, self.gt_name)
+            self._paths[pid] = {
+                "image": os.path.join(pdir, self.image_name),
+                "gt": os.path.join(pdir, self.gt_name),
+                "nn": os.path.join(pdir, self.nnunet_name),
+            }
+
+        self._cache = {}
+
+        for pid in self.patients:
+            gt_path = self._paths[pid]["gt"]
             if not os.path.exists(gt_path):
                 continue
 
-            gt_vol = sitk.GetArrayFromImage(sitk.ReadImage(gt_path))  # (Z, H, W)
+            gt_vol = sitk.GetArrayFromImage(sitk.ReadImage(gt_path))
             for z in range(gt_vol.shape[0]):
                 if np.max(gt_vol[z]) > 0:
                     self.index.append((pid, z))
@@ -71,45 +84,41 @@ class SAMDatasetFromNiiGz(Dataset):
     def __len__(self):
         return len(self.index)
 
-    # train box
-    # validation box
-    # 1024 图像固定四方向
-    def get_box(self, resized_mask, spacing_x, spacing_y, expand_cm=0):
+    @staticmethod
+    def _fallback_box(resized_mask):
+        h, w = resized_mask.shape[:2]
+        return torch.tensor([0, 0, w - 1, h - 1], dtype=torch.float32).unsqueeze(0)
+
+    def get_box(self, resized_mask, spacing_x, spacing_y, expand_cm=0.0):
         y_indices, x_indices = np.where(resized_mask > 0)
         if len(x_indices) == 0 or len(y_indices) == 0:
-            # Fallback box to avoid DataLoader collate crash when prompt mask is empty.
-            img_height, img_width = resized_mask.shape[:2]
-            box = np.array([0, 0, img_width - 1, img_height - 1], dtype=np.float32)
-            return torch.tensor(box).unsqueeze(0)
+            return self._fallback_box(resized_mask)
+
         x_min = np.min(x_indices)
         x_max = np.max(x_indices)
         y_min = np.min(y_indices)
         y_max = np.max(y_indices)
 
-        img_width = resized_mask.shape[1]  # W
-        img_height = resized_mask.shape[0]  # H
+        img_width = resized_mask.shape[1]
+        img_height = resized_mask.shape[0]
 
-        # 换算成像素数
-        expand_x_px = round(expand_cm / spacing_x)
-        expand_y_px = round(expand_cm / spacing_y)
+        expand_x_px = round(expand_cm / spacing_x) if spacing_x > 0 else 0
+        expand_y_px = round(expand_cm / spacing_y) if spacing_y > 0 else 0
 
-        # 应用扩展并裁剪边界
         x_min = max(x_min - expand_x_px, 0)
         x_max = min(x_max + expand_x_px, img_width - 1)
         y_min = max(y_min - expand_y_px, 0)
         y_max = min(y_max + expand_y_px, img_height - 1)
 
-        box = np.array([x_min, y_min, x_max, y_max]).astype(np.float32)
-        box_val = torch.tensor(box).unsqueeze(0)
-        return box_val
+        return torch.tensor([x_min, y_min, x_max, y_max], dtype=torch.float32).unsqueeze(0)
 
-    def __getitem__(self, idx):
-        pid, z = self.index[idx]
-        pdir = os.path.join(self.nii_root_dir, pid)
+    def _load_patient(self, pid):
+        if pid in self._cache:
+            return self._cache[pid]
 
-        image_path = os.path.join(pdir, self.image_name)
-        gt_path = os.path.join(pdir, self.gt_name)
-        nnunet_path = os.path.join(pdir, self.nnunet_name)
+        image_path = self._paths[pid]["image"]
+        gt_path = self._paths[pid]["gt"]
+        nnunet_path = self._paths[pid]["nn"]
 
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Missing image: {image_path}")
@@ -118,46 +127,56 @@ class SAMDatasetFromNiiGz(Dataset):
         if not os.path.exists(nnunet_path):
             raise FileNotFoundError(f"Missing nnUNet pred: {nnunet_path}")
 
-        # 读取 3D volume
-        img_vol = sitk.GetArrayFromImage(sitk.ReadImage(image_path))  # (Z, H, W)
-        gt_vol = sitk.GetArrayFromImage(sitk.ReadImage(gt_path))      # (Z, H, W)
-        nn_vol = sitk.GetArrayFromImage(sitk.ReadImage(nnunet_path))  # (Z, H, W)
-
-        # 计算原始图像 spacing_x, spacing_y
         img_nii = sitk.ReadImage(image_path)
-        # 计算resize比例, GetSize()[W,H,D]
-        resize_factor_x = self.target_image_size[1] / img_nii.GetSize()[0]  # W 1024 / 512 = 2.0
-        resize_factor_y = self.target_image_size[0] / img_nii.GetSize()[1]  # H 同上
-        # GetSpacing[W, H, D]
-        spacing_x_resized = img_nii.GetSpacing()[0] / resize_factor_x / 10.0  # mm → cm
-        spacing_y_resized = img_nii.GetSpacing()[1] / resize_factor_y / 10.0  # mm → cm
+        img_vol = sitk.GetArrayFromImage(img_nii)
+        gt_vol = sitk.GetArrayFromImage(sitk.ReadImage(gt_path))
+        nn_vol = sitk.GetArrayFromImage(sitk.ReadImage(nnunet_path))
 
-        # 取 slice
-        img_slice = img_vol[z]
-        gt_slice = gt_vol[z]
-        nn_slice = nn_vol[z]
+        resize_factor_x = self.target_image_size[1] / img_nii.GetSize()[0]
+        resize_factor_y = self.target_image_size[0] / img_nii.GetSize()[1]
+        spacing_x_resized = img_nii.GetSpacing()[0] / resize_factor_x / 10.0
+        spacing_y_resized = img_nii.GetSpacing()[1] / resize_factor_y / 10.0
 
-        # image: window/level -> 0-255 -> RGB -> resize(1024) -> tensor [3,1024,1024]
+        item = {
+            "img_vol": img_vol,
+            "gt_vol": gt_vol,
+            "nn_vol": nn_vol,
+            "spacing_x_resized": spacing_x_resized,
+            "spacing_y_resized": spacing_y_resized,
+        }
+        self._cache[pid] = item
+        return item
+
+    def __getitem__(self, idx):
+        pid, z = self.index[idx]
+        item = self._load_patient(pid)
+
+        img_slice = item["img_vol"][z]
+        gt_slice = item["gt_vol"][z]
+        nn_slice = item["nn_vol"][z]
+
         img_255 = window_level_transform(img_slice, self.window_center, self.window_width)
         img_rgb = Image.fromarray(img_255).convert("RGB")
         img_rgb = img_rgb.resize(self.target_image_size, resample=Image.BILINEAR)
-        img_np = np.array(img_rgb).astype(np.float32)
+        img_np = np.array(img_rgb, dtype=np.float32)
         image = torch.from_numpy(img_np).permute(2, 0, 1)
 
-        # GT: 保持原始尺寸，不 resize
         gt_bin = (gt_slice > 0).astype(np.uint8)
-        GT = torch.tensor(gt_bin, dtype=torch.float32).unsqueeze(0)  # [1, H, W]
+        GT = torch.tensor(gt_bin, dtype=torch.float32).unsqueeze(0)
 
-        # mask_prompt: nnUNet -> binary -> resize(1024) -> box
         nn_bin = (nn_slice > 0).astype(np.uint8)
         nn_bin_1024 = cv2.resize(nn_bin, self.target_image_size, interpolation=cv2.INTER_NEAREST)
-        # 生成box提示
-        box = self.get_box(nn_bin_1024, spacing_x_resized, spacing_y_resized)
+        box = self.get_box(
+            nn_bin_1024,
+            item["spacing_x_resized"],
+            item["spacing_y_resized"],
+            expand_cm=self.expand_cm,
+        )
 
         return {
             "image": image,
             "GT": GT,
             "box": box,
-            # "patient_id": pid,
-            # "slice_idx": z,
+            "patient_id": pid,
+            "slice_idx": z,
         }

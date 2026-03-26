@@ -9,11 +9,11 @@ from segment_anything import sam_model_registry
 from testdataset import SAMTestDatasetFromNiiGz   # 你的 dataset
 
 # ================= 配置 =================
-datanii_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260316_CTV/Cropdatanii/test_nii"
-output_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260316_CTV/nnUNet_crop_box/TestResult"
+datanii_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/Cropdatanii/test_nii"
+output_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/nnUNet_crop_box/TestResult"
 
 sam_ckpt = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
-finetuned_ckpt = "/home/wusi/segment-anything/SAMdata/Rectal/20260316_CTV/nnUNet_crop_box/TrainResult/fold_2/weights/best.pth"
+finetuned_ckpt = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/nnUNet_crop_box/TrainResult/fold_2/weights/best.pth"
 model_type = "vit_b"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
