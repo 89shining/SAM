@@ -1,7 +1,14 @@
-﻿import json
+﻿import argparse
+import json
 import os
 import re
+import sys
 from collections import defaultdict
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "..", "..", "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
 import numpy as np
 import SimpleITK as sitk
@@ -9,17 +16,18 @@ import torch
 from torch.utils.data import DataLoader
 
 from segment_anything import sam_model_registry
-from testdataset import SAMTestDatasetFromNiiGz
+from testdataset import SAMImageEncoderTestDatasetFromNiiGz
 
 
 # ================= Config =================
 datanii_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/Cropdatanii/test_nii"
-nnunet_prompt_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_uncertainty"
-output_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/TestResult"
-train_result_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/TrainResult"
+nnunet_prompt_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_probability"
+output_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/Image_encoder/threeChannel_modulation/TestResult"
+train_result_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/Image_encoder/threeChannel_modulation/TrainResult"
 
 sam_ckpt = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
 model_type = "vit_b"
+mode = "modulation"
 
 batch_size = 1
 use_gt_positive_only = False
@@ -91,7 +99,33 @@ def resolve_best_checkpoint(train_result_dir):
     return candidates[0], candidates
 
 
-def main():
+def resolve_checkpoint_by_fold(train_result_dir, fold_idx):
+    fold_name = f"fold_{fold_idx + 1}"
+    fold_dir = os.path.join(train_result_dir, fold_name)
+    metrics_path = os.path.join(fold_dir, "best_metrics.json")
+    ckpt_path = os.path.join(fold_dir, "weights", "best_by_dice.pth")
+
+    if not os.path.isdir(fold_dir):
+        raise FileNotFoundError(f"Fold directory not found: {fold_dir}")
+    if not os.path.exists(metrics_path):
+        raise FileNotFoundError(f"best_metrics.json not found: {metrics_path}")
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"best_by_dice.pth not found: {ckpt_path}")
+
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        m = json.load(f)
+
+    item = {
+        "fold_name": fold_name,
+        "dice": float(m.get("best_val_patient_dice", -1.0)),
+        "epoch": int(m.get("best_epoch", -1)),
+        "ckpt": ckpt_path,
+        "metrics": metrics_path,
+    }
+    return item, [item]
+
+
+def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     disable_cudnn = os.environ.get("SAM_DISABLE_CUDNN", "1") == "1"
     if disable_cudnn:
@@ -102,12 +136,21 @@ def main():
         torch.backends.cudnn.benchmark = False
     os.makedirs(output_dir, exist_ok=True)
 
-    best_item, all_items = resolve_best_checkpoint(train_result_dir)
+    if args.fold is None:
+        best_item, all_items = resolve_best_checkpoint(train_result_dir)
+    else:
+        if args.fold < 0 or args.fold >= 5:
+            raise ValueError(f"--fold must be in [0, 4], got {args.fold}")
+        best_item, all_items = resolve_checkpoint_by_fold(train_result_dir, args.fold)
+
     finetuned_ckpt = best_item["ckpt"]
 
-    print(f"[AutoSelect] Use best fold: {best_item['fold_name']}, patient_dice={best_item['dice']:.6f}, ckpt={finetuned_ckpt}")
+    print(
+        f"[AutoSelect] mode={mode}, best fold={best_item['fold_name']}, "
+        f"patient_dice={best_item['dice']:.6f}, ckpt={finetuned_ckpt}"
+    )
 
-    test_dataset = SAMTestDatasetFromNiiGz(
+    test_dataset = SAMImageEncoderTestDatasetFromNiiGz(
         nii_root_dir=datanii_dir,
         target_image_size=(1024, 1024),
         mask_prompt_size=(256, 256),
@@ -117,6 +160,7 @@ def main():
         npz_pattern="CTV_{:03d}.npz",
         prompt_class_idx=1,
         prompt_eps=1e-4,
+        mode=mode,
         use_gt_positive_only=use_gt_positive_only,
     )
     test_loader = build_loader(test_dataset, batch_size=batch_size)
@@ -140,28 +184,28 @@ def main():
             slice_idxs = batch["slice_idx"]
 
             input_images = torch.stack([net.preprocess(im) for im in imgs], dim=0)
-            with torch.no_grad():
-                image_embeddings = net.image_encoder(input_images)
-
-            sparse_embeddings, dense_embeddings = net.prompt_encoder(
-                points=None, boxes=None, masks=mask_prompt
-            )
-
-            low_res_masks, _ = net.mask_decoder(
-                image_embeddings=image_embeddings,
-                image_pe=net.prompt_encoder.get_dense_pe(),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
-                multimask_output=False,
-            )
+            image_embeddings = net.image_encoder(input_images)
 
             bsz = imgs.shape[0]
             for i in range(bsz):
+                sparse_embeddings, dense_embeddings = net.prompt_encoder(
+                    points=None,
+                    boxes=None,
+                    masks=mask_prompt[i].unsqueeze(0),
+                )
+
+                low_res_masks, _ = net.mask_decoder(
+                    image_embeddings=image_embeddings[i].unsqueeze(0),
+                    image_pe=net.prompt_encoder.get_dense_pe(),
+                    sparse_prompt_embeddings=sparse_embeddings,
+                    dense_prompt_embeddings=dense_embeddings,
+                    multimask_output=False,
+                )
+
                 h = int(batch["original_size"][0][i])
                 w = int(batch["original_size"][1][i])
-
                 masks = net.postprocess_masks(
-                    low_res_masks[i].unsqueeze(0),
+                    low_res_masks,
                     input_size=imgs.shape[-2:],
                     original_size=(h, w),
                 )
@@ -177,7 +221,6 @@ def main():
                 slice_dice_list.append(dice_score(pred_np, gt_np))
 
     patient_dice = {}
-
     for pa in os.listdir(datanii_dir):
         pdir = os.path.join(datanii_dir, pa)
         if not os.path.isdir(pdir):
@@ -201,7 +244,7 @@ def main():
         pred_img = sitk.GetImageFromArray(pred_arr)
         pred_img.CopyInformation(ref_img)
 
-        match = re.search(r'\d+', pa)
+        match = re.search(r"\d+", pa)
         if match:
             idx = match.group(0).zfill(3)
             save_name = f"CTV_{idx}.nii.gz"
@@ -211,6 +254,7 @@ def main():
         sitk.WriteImage(pred_img, os.path.join(output_dir, save_name))
 
     metrics = {
+        "mode": mode,
         "num_slices": len(slice_dice_list),
         "slice_dice_mean": float(np.mean(slice_dice_list)) if len(slice_dice_list) > 0 else 0.0,
         "slice_dice_std": float(np.std(slice_dice_list)) if len(slice_dice_list) > 0 else 0.0,
@@ -230,7 +274,7 @@ def main():
 
     print("DONE.")
     print(
-        f"selected_fold={metrics['selected_fold']}, "
+        f"mode={mode}, selected_fold={metrics['selected_fold']}, "
         f"slice_dice_mean={metrics['slice_dice_mean']:.6f}, "
         f"patient_dice_mean={metrics['patient_dice_mean']:.6f}, "
         f"num_patients={metrics['num_patients']}"
@@ -238,4 +282,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Test SAM image encoder prior model.")
+    parser.add_argument(
+        "--fold",
+        type=int,
+        default=None,
+        help="Fold index to test (0-based). Default: auto select best fold by validation dice.",
+    )
+    cli_args = parser.parse_args()
+    main(cli_args)
+

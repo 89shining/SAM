@@ -408,8 +408,9 @@ def train_one_fold(fold, train_idx, val_idx, dataset, net, device,
 
 if __name__ == '__main__':
     nii_root_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/Cropdatanii/train_nii"
-    nnunet_prompt_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_uncertainty"
-    save_dir = '/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/TrainResult'
+    nnunet_prob_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_probability"
+    nnunet_uncertainty_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_uncertainty/3D_entropy"
+    save_dir = '/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_uncertainty/Prompt_encoder/PxU/TrainResult'
     os.makedirs(save_dir, exist_ok=True)
 
     dataset = SAMDatasetFromNiiGz(
@@ -418,7 +419,8 @@ if __name__ == '__main__':
         mask_prompt_size=(256, 256),
         image_name="image.nii.gz",
         gt_name="CTV.nii.gz",
-        nnunet_prompt_npz_dir=nnunet_prompt_npz_dir,
+        nnunet_prob_npz_dir=nnunet_prob_npz_dir,
+        nnunet_uncertainty_npz_dir=nnunet_uncertainty_npz_dir,
         npz_pattern="CTV_{:03d}.npz",
         prompt_class_idx=1,
         prompt_eps=1e-4,
@@ -486,4 +488,5 @@ if __name__ == '__main__':
         torch.cuda.empty_cache()
 
     print("Five-fold cross-validation completed.")
+
 
