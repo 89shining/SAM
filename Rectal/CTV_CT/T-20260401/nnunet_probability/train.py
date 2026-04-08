@@ -1,10 +1,11 @@
 ﻿# Five-fold cross-validation training for CTV (nnUNet mask prompt)
+import argparse
 import json
 import os
 import sys
 
-sys.path.append("/home/wusi/segment-anything")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import numpy as np
 import torch
@@ -25,6 +26,21 @@ from segment_anything import sam_model_registry
 manual_seed = int.from_bytes(os.urandom(4), 'little')
 random.seed(manual_seed)
 torch.manual_seed(manual_seed)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train SAM with nnUNet probability prompt (5-fold GroupKFold).")
+    parser.add_argument("--nii-root-dir", required=True, help="Path to train_nii root directory.")
+    parser.add_argument("--nnunet-prompt-npz-dir", required=True, help="Directory containing CTV_XXX.npz files.")
+    parser.add_argument("--save-dir", required=True, help="Output directory for fold checkpoints and logs.")
+    parser.add_argument("--sam-checkpoint", required=True, help="Path to SAM checkpoint (e.g. sam_vit_b_01ec64.pth).")
+    parser.add_argument("--model-type", default="vit_b", help="SAM model type key in sam_model_registry.")
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--n-splits", type=int, default=5)
+    parser.add_argument("--cuda-visible-devices", default=None, help="Optional CUDA_VISIBLE_DEVICES value.")
+    return parser.parse_args()
 
 
 def _build_loader(dataset, indices, batch_size, shuffle, device):
@@ -407,9 +423,10 @@ def train_one_fold(fold, train_idx, val_idx, dataset, net, device,
 
 
 if __name__ == '__main__':
-    nii_root_dir = "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/Cropdatanii/train_nii"
-    nnunet_prompt_npz_dir = "/home/wusi/nnUNet/nnUNetFrame/DATASET/nnUNet_results/Dataset014_RectalCTV60pCrop/nnUNetTrainer__nnUNetPlans__3d_fullres/testResult_5folds_uncertainty"
-    save_dir = '/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/TrainResult'
+    args = parse_args()
+    nii_root_dir = args.nii_root_dir
+    nnunet_prompt_npz_dir = args.nnunet_prompt_npz_dir
+    save_dir = args.save_dir
     os.makedirs(save_dir, exist_ok=True)
 
     dataset = SAMDatasetFromNiiGz(
@@ -424,10 +441,11 @@ if __name__ == '__main__':
         prompt_eps=1e-4,
     )
 
-    sam_checkpoint = "/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth"
-    model_type = "vit_b"
+    sam_checkpoint = args.sam_checkpoint
+    model_type = args.model_type
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+    if args.cuda_visible_devices is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.cuda_visible_devices)
     disable_cudnn = os.environ.get("SAM_DISABLE_CUDNN", "1") == "1"
     if disable_cudnn:
         torch.backends.cudnn.enabled = False
@@ -443,7 +461,7 @@ if __name__ == '__main__':
 
     # Patient-level split by group
     groups = [dataset.index[i][0] for i in range(len(dataset))]
-    gkf = GroupKFold(n_splits=5)
+    gkf = GroupKFold(n_splits=args.n_splits)
 
     for fold, (train_idx, val_idx) in enumerate(gkf.split(np.zeros(len(dataset)), groups=groups)):
         log_path = os.path.join(save_dir, f'fold_{fold + 1}/train_fold{fold + 1}.log')
@@ -479,7 +497,7 @@ if __name__ == '__main__':
 
         train_one_fold(
             fold, train_idx, val_idx, dataset, net, device,
-            epochs=200, batch_size=8, lr=0.001, save_dir=save_dir
+            epochs=args.epochs, batch_size=args.batch_size, lr=args.lr, save_dir=save_dir
         )
         logging.info(f"Training Fold {fold + 1} completed.")
 

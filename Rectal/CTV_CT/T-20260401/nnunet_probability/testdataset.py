@@ -17,6 +17,13 @@ def window_level_transform(img, window_center=40, window_width=400):
     return img.astype(np.uint8)
 
 
+def _patient_sort_key(pid):
+    nums = re.findall(r"\d+", pid)
+    if nums:
+        return 0, int(nums[-1]), pid
+    return 1, pid
+
+
 class SAMTestDatasetFromNiiGz(Dataset):
     """
     Test dataset for SAM with nnUNet probability->logit prompt.
@@ -58,7 +65,7 @@ class SAMTestDatasetFromNiiGz(Dataset):
         self.index = []
         self.patients = sorted(
             [d for d in os.listdir(nii_root_dir) if os.path.isdir(os.path.join(nii_root_dir, d))],
-            key=lambda x: int(x.lstrip("p_")) if x.startswith("p_") and x.lstrip("p_").isdigit() else x
+            key=_patient_sort_key
         )
 
         self._paths = {}
