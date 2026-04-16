@@ -1,3 +1,7 @@
+"""
+评估nnunet预测结果GT和pred的非空切片2d dsc和2d hd95的值
+"""
+
 import argparse
 from pathlib import Path
 

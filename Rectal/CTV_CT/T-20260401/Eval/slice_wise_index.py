@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--pred-dir",
         type=Path,
-        default=Path("/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/nnUNet_crop_mask/TestResult"),
+        default=Path("/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/nnunet_probability/Prompt_encoder/TestResult"),
         help="Prediction directory (contains .nii.gz files and maybe other files).",
     )
     parser.add_argument(
@@ -44,8 +44,8 @@ def parse_args():
         "--out-csv",
         type=Path,
         default=Path(
-            "/home/wusi/segment-anything/SAMdata/Rectal/20260325_CTV/"
-            "nnUNet_crop_mask/slice_metrics_total.csv"
+            "/home/wusi/segment-anything/SAMdata/Rectal/20260401_CTV/"
+            "nnunet_probability/Prompt_encoder/slice_metrics_total.csv"
         ),
         help="Output CSV path for total slice-wise metrics.",
     )
