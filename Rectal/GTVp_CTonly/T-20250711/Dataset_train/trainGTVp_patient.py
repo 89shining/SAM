@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument('--target_h', type=int, default=1024)
     parser.add_argument('--target_w', type=int, default=1024)
 
-    parser.add_argument('--patient_counts', type=int, nargs='+', default=[10, 20, 30, 40, 50])
+    parser.add_argument('--patient_counts', type=int, nargs='+', default=[10, 20, 30, 40, 50, 60])
     parser.add_argument('--n_splits', type=int, default=5)
     parser.add_argument('--subset_seed', type=int, default=20250711,
                         help='Random seed for patient subset sampling.')
