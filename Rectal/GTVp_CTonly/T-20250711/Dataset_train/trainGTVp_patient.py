@@ -3,6 +3,7 @@ import sys
 import random
 import logging
 import argparse
+import gc
 
 import torch
 import pandas as pd
@@ -134,7 +135,9 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
                 bbox = batch['train_box'].to(device)
 
                 input_images = torch.stack([net.preprocess(im) for im in imgs], dim=0)
-                image_embeddings = net.image_encoder(input_images)
+                # Image encoder is frozen, so disable gradient tracking to save GPU memory.
+                with torch.no_grad():
+                    image_embeddings = net.image_encoder(input_images)
 
                 logits_list = []
                 for i in range(len(imgs)):
@@ -167,6 +170,7 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
 
                 pbar.set_postfix({'TrainLoss': f'{train_epoch_loss / train_n_loss:.4f}'})
                 pbar.update(1)
+                del imgs, true_masks, bbox, input_images, image_embeddings, logits_list, masks_pred, train_loss
 
         train_meanLoss = train_epoch_loss / train_n_loss
         LOSS.append(train_meanLoss)
@@ -211,6 +215,7 @@ def train_one_fold(fold, train_idx, val_idx, all_image_paths, dataset, net, devi
 
                     pbar.set_postfix({'ValLoss': f'{val_epoch_loss / val_n_loss:.4f}'})
                     pbar.update(1)
+                    del imgs, true_masks, bbox, input_images, image_embeddings, logits_list, masks_pred, val_loss
 
         val_meanLoss = val_epoch_loss / val_n_loss
         LOSS.append(val_meanLoss)
@@ -342,6 +347,13 @@ def main():
 
             fold_dir = os.path.join(exp_dir, f'fold_{fold + 1}')
             os.makedirs(fold_dir, exist_ok=True)
+            best_ckpt_path = os.path.join(fold_dir, 'weights', 'best.pth')
+
+            if os.path.exists(best_ckpt_path):
+                logging.info(
+                    f'[Sample {patient_count}][Fold {fold + 1}] Skip: existing checkpoint found at {best_ckpt_path}'
+                )
+                continue
 
             with open(os.path.join(fold_dir, 'train_patients.txt'), 'w') as f:
                 f.writelines(f'{pid}\n' for pid in train_patients)
@@ -399,6 +411,8 @@ def main():
             )
 
             logging.info(f'[Sample {patient_count}] Training Fold {fold + 1} completed.')
+            del net
+            gc.collect()
             torch.cuda.empty_cache()
 
         pd.DataFrame(fold_split_rows).to_csv(
