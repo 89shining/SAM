@@ -185,7 +185,7 @@ def run_single_setting(sample_size, expand_cm, device):
         print(f'  - {ckpt}')
 
     test_dataset = TestDataset(
-        csv_path=args.test_csv_path,
+        csv_path=TEST_CSV_PATH,
         root_dir=TEST_ROOT_DIR,
         nii_dir=TEST_NII_DIR,
         target_size=(TARGET_H, TARGET_W),
