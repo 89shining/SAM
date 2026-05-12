@@ -24,7 +24,7 @@ from segment_anything import sam_model_registry
 # Explicit configuration
 # =========================
 TRAIN_RESULTS_DIR = '/home/wusi/segment-anything/SAMdata/Rectal/20250711_GTVp/TrainResults/DaatasetSize_fre_img'
-SAMPLE_SIZES = [10, 20, 30, 40, 50, 60]
+SAMPLE_SIZES = [50, 60]
 FOLDS = [1, 2, 3, 4, 5]
 
 SAM_CHECKPOINT = '/home/wusi/segment-anything/demo/configs/checkpoint/sam_vit_b_01ec64.pth'
