@@ -175,6 +175,11 @@ def run_single_setting(sample_size, expand_cm, device):
     fold_ckpts = build_fold_ckpts(TRAIN_RESULTS_DIR, sample_size, FOLDS)
 
     output_dir = os.path.join(BASE_OUTPUT_DIR, f'sample_{sample_size}', f'expand_{expand_cm}cm')
+    done_flag = os.path.join(output_dir, '_DONE')
+    if os.path.exists(done_flag):
+        print(f'[SKIP] Already completed: Sample {sample_size}, expand {expand_cm}cm')
+        return
+
     os.makedirs(output_dir, exist_ok=True)
     tmp_png_dir = os.path.join(output_dir, 'tmp_png')
     os.makedirs(tmp_png_dir, exist_ok=True)
@@ -185,7 +190,7 @@ def run_single_setting(sample_size, expand_cm, device):
         print(f'  - {ckpt}')
 
     test_dataset = TestDataset(
-        csv_path=args.test_csv_path,
+        csv_path=TEST_CSV_PATH,
         root_dir=TEST_ROOT_DIR,
         nii_dir=TEST_NII_DIR,
         target_size=(TARGET_H, TARGET_W),
@@ -198,9 +203,19 @@ def run_single_setting(sample_size, expand_cm, device):
         model = sam_model_registry[MODEL_TYPE](checkpoint=None)
         model.to(device)
         model.load_state_dict(torch.load(SAM_CHECKPOINT, map_location=device), strict=False)
-        model.load_state_dict(torch.load(ckpt, map_location=device), strict=False)
-        model.eval()
-        nets.append(model)
+        try:
+            model.load_state_dict(torch.load(ckpt, map_location=device), strict=False)
+            model.eval()
+            nets.append(model)
+        except Exception as e:
+            print(f'[WARN] Skip invalid checkpoint: {ckpt}')
+            print(f'       Reason: {e}')
+
+    if len(nets) == 0:
+        raise RuntimeError(
+            f'No valid fold checkpoints for sample_{sample_size}, expand_{expand_cm}cm.'
+        )
+    print(f'Loaded {len(nets)}/{len(fold_ckpts)} fold checkpoints.')
 
     with torch.no_grad():
         for image, _, box, original_size, image_path in test_loader:
@@ -270,6 +285,8 @@ def run_single_setting(sample_size, expand_cm, device):
         writer.writerows(all_slice_mappings)
 
     shutil.rmtree(tmp_png_dir)
+    with open(done_flag, 'w', encoding='utf-8') as f:
+        f.write('ok\n')
     print(f'Done: Sample {sample_size}, expand {expand_cm}cm -> {output_dir}')
 
 
